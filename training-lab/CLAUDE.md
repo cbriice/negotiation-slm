@@ -72,5 +72,5 @@ Local agent metrics: verbosity, hallucination; Global agent metrics: token throu
 
 ## QLoRA usage:
 
-Training will be done with **4-bit QLoRA** using **DPO pairs and SFT packets** generated from conversations from World episodes for training data. **IMPORTANT:** For parameters used when creating QLoRA training functions, **consult training_parameters.py FIRST** before coming up with your own parameters. Templates for SFT and DPO packets are in the schema/ folder. 
+Training will be done with **4-bit QLoRA** using **DPO pairs and SFT packets** generated from conversations from World episodes for training data. **IMPORTANT:** For parameters used when creating QLoRA training functions, **consult training_parameters.py FIRST** before coming up with your own parameters. Templates for SFT and DPO packets are in the schema/ folder. Note - 8-bit/nf4 can be toggled in training_parameters.py if gradient noise requires it.
 
