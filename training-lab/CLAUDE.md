@@ -20,7 +20,7 @@ Teachers:
 ## Negotiation training plan:
 
 1. Run SelfChatWorld to get a baseline - how good is no-training model at negotiation? 
-2. 0.5 epoch each of Deal or No Deal built-in task and Casino built-in task. Use built-in SFT training to the task
+2. 0.5 epoch each of Deal or No Deal built-in task and Casino built-in task. Export tasks to JSONL following the SFT template and the model will be trained on a baseline SFT in TRL
     1. Goal: baseline training of SLM on negotiation behavior and proper dialogue for negotiations. Nudge it in the right direction before making training more specific. Save this as frozen reference for DPO: negotiation_baseline-version_number
 3. Run SelfChatWorld (~1500 episodes). Save JSONL logs. Use minimal state seeds/opening lines with example intent metadata. 
     1. Note - maintain a subsection of the seeds used in this stage for regression control
@@ -42,6 +42,7 @@ Negotiation actions: [PROPOSE] for a normal bargaining turn. **For negotiation t
 
 Training with ParlAI will be mostly negotiation-focused training but will have a strategy component too, since part of the agent’s task in the negotiation stage will be to generate a strategy to formulate a response based on. So it should be good at interpreting matched counterparties’ intents including the details relevant to negotiation to create a strategy that will help it gain some sort of advantage in principle.
 
+Reference the **official ParlAI documentation** for syntax, arguments, etc. so that you don't hallucinate syntax errors.
 ---
 
 ## Strategy training plan:
