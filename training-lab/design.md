@@ -46,3 +46,43 @@
 5.1: Modular FOR SURE. Use the folders that exist to modulate
 5.2: Use the existing tasks for the warm-start training, but data will be exported as JSONL and TRL SFTTrainer will be used to run initial warm-start training. This clarification is updated in step 2 of negotiation training plan in CLAUDE.md
 5.3: a real-time metrics dashboard using Dash for the interface would be good. for numerical data, CSV logging is good. for logging and storing JSON data, NDJSON is good
+
+
+# Implementation plan
+Phase 1: Core Infrastructure
+  1. Set up base classes for agents, teachers, and worlds
+  2. Create HF model wrapper as ParlAI Agent
+  3. Implement data conversion pipeline (ParlAI -> TRL formats)
+  4. Set up metrics tracking system with CSV logging
+
+  Phase 2: World Integration
+  1. Implement SelfChatWorld runner with state seeding
+  2. Create DialogPartnerWorld with RuleAgent integration
+  3. Build episode logging system with NDJSON output
+  4. Add protocol validation for negotiation actions
+
+  Phase 3: Training Pipeline
+  1. QLoRA trainer using TRL's SFTTrainer/DPOTrainer
+  2. Data annotation tools for identifying good/bad examples
+  3. Automated DPO pair generation from annotated episodes
+  4. Model checkpointing and versioning system
+
+  Phase 4: Evaluation & Monitoring
+  1. Rule-based protocol scorer in Python
+  2. Claude API integration for conversation evaluation
+  3. Dash dashboard for real-time metrics visualization
+  4. Statistical analysis tools for performance tracking
+
+  Phase 5: Advanced Features
+  1. Data augmentation/mutators for robustness training
+  2. Strategy generation and training components
+  3. Human evaluation interface via ConsoleAgent
+  4. Regression testing framework
+
+  Key Design Decisions
+
+  1. Separation of Concerns: ParlAI handles dialogue management and data generation; TRL handles actual training
+  2. Modular Stage Execution: Each training stage can be run independently via command-line flags
+  3. Comprehensive Logging: Every episode saved as NDJSON with full metadata
+  4. Flexible Evaluation: Local rule-based scoring with optional Claude API for deeper analysis
+  5. Real-time Monitoring: Dash dashboard shows live metrics during training runs
