@@ -1,4 +1,5 @@
 import torch
+import logging
 from typing import Optional, Tuple
 from pathlib import Path
 
@@ -10,6 +11,23 @@ from transformers import (
 )
 
 from agents.negotiator_base import NegotiatorBase, NegotiationAction
+
+# Set up logging for agent-related logs
+from pathlib import Path
+
+# Ensure logs directory exists
+Path('logs').mkdir(exist_ok=True)
+
+# Configure logging with 'w' mode to clear log on each run
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('logs/agent_logs.log', mode='w'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
 
 class HFNegotiator(NegotiatorBase):
     """HuggingFace model wrapped as a ParlAI negotiation agent."""
@@ -80,7 +98,7 @@ class HFNegotiator(NegotiatorBase):
     
     def _load_model(self):
         """Load the HuggingFace model with optional LoRA and quantization."""
-        print(f"Loading model: {self.model_name}")
+        logger.info(f"Loading model: {self.model_name}")
         
         # Quantization config for 4-bit
         bnb_config = None
@@ -113,7 +131,7 @@ class HFNegotiator(NegotiatorBase):
         
         # Load LoRA weights if provided
         if self.lora_checkpoint and Path(self.lora_checkpoint).exists():
-            print(f"Loading LoRA checkpoint: {self.lora_checkpoint}")
+            logger.info(f"Loading LoRA checkpoint: {self.lora_checkpoint}")
             try:
                 from peft.peft_model import PeftModel
                 self.model = PeftModel.from_pretrained(
@@ -122,7 +140,7 @@ class HFNegotiator(NegotiatorBase):
                     torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
                 )
             except ImportError:
-                print("PEFT not installed, skipping LoRA loading")
+                logger.warning("PEFT not installed, skipping LoRA loading")
         
         # Set to eval mode
         self.model.eval()

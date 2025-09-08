@@ -4,12 +4,16 @@ Special handling for human-in-the-loop evaluation and edge case testing.
 """
 
 import json
+import logging
 import random
 from typing import Dict, Any, List, Optional
 from pathlib import Path
 from datetime import datetime
 
 from tasks.negotiation_teacher import NegotiationJSONTeacher
+
+# Set up logging
+logger = logging.getLogger(__name__)
 
 
 class HumanEvalTeacher(NegotiationJSONTeacher):
@@ -113,7 +117,7 @@ class HumanEvalTeacher(NegotiationJSONTeacher):
                             self.eval_scenarios.append(scenario)
                         except json.JSONDecodeError:
                             continue
-            print(f"Loaded {len(self.eval_scenarios)} evaluation scenarios")
+            logger.info(f"Loaded {len(self.eval_scenarios)} evaluation scenarios")
         else:
             # Generate default evaluation scenarios
             self.eval_scenarios = self._generate_eval_scenarios()
@@ -271,7 +275,7 @@ class HumanEvalTeacher(NegotiationJSONTeacher):
         with open(filepath, 'w') as f:
             for scenario in self.eval_scenarios:
                 f.write(json.dumps(scenario) + '\n')
-        print(f"Saved {len(self.eval_scenarios)} evaluation scenarios to {filepath}")
+        logger.info(f"Saved {len(self.eval_scenarios)} evaluation scenarios to {filepath}")
     
     def _format_eval_context(self, scenario: Dict[str, Any], side: str) -> str:
         """Format evaluation scenario context with special instructions."""
@@ -427,7 +431,7 @@ class HumanEvalTeacher(NegotiationJSONTeacher):
         with open(summary_path, 'w') as f:
             json.dump(summary, f, indent=2)
         
-        print(f"Session summary saved to {summary_path}")
+        logger.info(f"Session summary saved to {summary_path}")
     
     def _summarize_feedback(self) -> Dict[str, Any]:
         """Summarize human feedback collected during the session."""

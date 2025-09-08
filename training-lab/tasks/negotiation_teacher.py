@@ -4,6 +4,7 @@ Loads JSONL episodes and injects state seeds for training.
 """
 
 import json
+import logging
 import os
 import random
 from typing import Dict, Any, List, Optional, Tuple
@@ -11,6 +12,9 @@ from pathlib import Path
 
 from parlai.core.teachers import FixedDialogTeacher
 from parlai.core.message import Message
+
+# Set up logging
+logger = logging.getLogger(__name__)
 
 
 class NegotiationJSONTeacher(FixedDialogTeacher):
@@ -106,7 +110,7 @@ class NegotiationJSONTeacher(FixedDialogTeacher):
         
         if not filepath.exists():
             # If file doesn't exist, create empty episodes list
-            print(f"Warning: Data file {filepath} not found. Using empty dataset.")
+            logger.warning(f"Data file {filepath} not found. Using empty dataset.")
             self.episodes = []
             return
         
@@ -118,14 +122,14 @@ class NegotiationJSONTeacher(FixedDialogTeacher):
                         episode = json.loads(line)
                         self.episodes.append(episode)
                     except json.JSONDecodeError as e:
-                        print(f"Warning: Failed to parse line: {e}")
+                        logger.warning(f"Failed to parse line: {e}")
                         continue
         
         # Shuffle if requested
         if self.shuffle and self.episodes:
             random.shuffle(self.episodes)
         
-        print(f"Loaded {len(self.episodes)} episodes from {filepath}")
+        logger.info(f"Loaded {len(self.episodes)} episodes from {filepath}")
     
     def _format_state_context(self, state: Dict[str, Any], side: str) -> str:
         """Format state information as context string."""
@@ -300,4 +304,4 @@ class NegotiationJSONTeacher(FixedDialogTeacher):
                 
                 f.write(json.dumps(episode) + '\n')
         
-        print(f"Saved {len(self.episodes)} episodes to {filepath}")
+        logger.info(f"Saved {len(self.episodes)} episodes to {filepath}")

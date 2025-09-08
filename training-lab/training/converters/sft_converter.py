@@ -2,9 +2,13 @@
 SFT (Supervised Fine-Tuning) format converter.
 """
 
+import logging
 from typing import Dict, Any, List, Optional
 from pathlib import Path
 from training.converters.base import BaseConverter
+
+# Set up logging
+logger = logging.getLogger(__name__)
 
 
 class SFTConverter(BaseConverter):
@@ -130,8 +134,8 @@ class SFTConverter(BaseConverter):
         
         self.save_jsonl(all_sft, output_path)
         
-        print(f"Converted {len(episodes)} episodes to {len(all_sft)} SFT examples")
-        print(f"Saved to {output_path}")
+        logger.info(f"Converted {len(episodes)} episodes to {len(all_sft)} SFT examples")
+        logger.info(f"Saved to {output_path}")
         
         return str(output_path)
     
@@ -167,7 +171,7 @@ class SFTConverter(BaseConverter):
         
         self.save_jsonl(filtered, output_path)
         
-        print(f"Filtered {len(examples)} to {len(filtered)} examples (min_score={min_score})")
-        print(f"Saved to {output_path}")
+        logger.info(f"Filtered {len(examples)} to {len(filtered)} examples (min_score={min_score})")
+        logger.info(f"Saved to {output_path}")
         
         return str(output_path)

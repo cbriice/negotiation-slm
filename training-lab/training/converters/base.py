@@ -3,8 +3,12 @@ Base converter functionality and utilities.
 """
 
 import json
+import logging
 from pathlib import Path
 from typing import Dict, Any, List, Optional
+
+# Set up logging
+logger = logging.getLogger(__name__)
 
 
 class BaseConverter:
@@ -36,7 +40,7 @@ class BaseConverter:
                     try:
                         data.append(json.loads(line))
                     except json.JSONDecodeError as e:
-                        print(f"Warning: Failed to parse line: {e}")
+                        logger.warning(f"Failed to parse line: {e}")
         return data
     
     def extract_dialogue_history(self, dialogue: List[Dict], 

@@ -2,6 +2,7 @@
 Export built-in ParlAI tasks (Deal-or-No-Deal, Casino) to training format.
 """
 
+import logging
 from typing import Dict, Any, List, Optional, Tuple
 from pathlib import Path
 import re
@@ -9,6 +10,9 @@ from training.converters.base import BaseConverter
 from parlai.core.params import ParlaiParser
 from parlai.core.worlds import create_task
 from parlai.core.agents import create_agent
+
+# Set up logging (will use parent logger from data_converter if available)
+logger = logging.getLogger(__name__)
 
 
 class BuiltinTaskExporter(BaseConverter):
@@ -41,7 +45,7 @@ class BuiltinTaskExporter(BaseConverter):
         Returns:
             List of episodes in standard format
         """
-        print(f"Exporting {task_name} ({datatype})...")
+        logger.info(f"Exporting {task_name} ({datatype})...")
         
         try:
             # Setup ParlAI task
@@ -73,13 +77,13 @@ class BuiltinTaskExporter(BaseConverter):
                         episode_count += 1
                 
                 if world.epoch_done():
-                    print(f"Epoch complete: {episode_count} episodes extracted")
+                    logger.info(f"Epoch complete: {episode_count} episodes extracted")
                     break
             
             return episodes
             
         except Exception as e:
-            print(f"Error exporting {task_name}: {e}")
+            logger.error(f"Error exporting {task_name}: {e}")
             return []
     
     def _convert_observation(self, 
@@ -313,10 +317,10 @@ class BuiltinTaskExporter(BaseConverter):
                 self.save_jsonl(episodes, output_path)
                 output_files[task_name] = str(output_path)
                 
-                print(f"Exported {len(episodes)} episodes from {task_name}")
-                print(f"Saved to {output_path}")
+                logger.info(f"Exported {len(episodes)} episodes from {task_name}")
+                logger.info(f"Saved to {output_path}")
             else:
-                print(f"No episodes exported from {task_name}")
+                logger.warning(f"No episodes exported from {task_name}")
         
         return output_files
     
@@ -344,7 +348,7 @@ class BuiltinTaskExporter(BaseConverter):
             if default_path.exists():
                 episodes = self.load_jsonl(default_path)
             else:
-                print(f"No episodes file found for {task_name}")
+                logger.warning(f"No episodes file found for {task_name}")
                 return ""
         
         # Convert to SFT format
@@ -365,7 +369,7 @@ class BuiltinTaskExporter(BaseConverter):
         output_path.parent.mkdir(parents=True, exist_ok=True)
         self.save_jsonl(all_sft, output_path)
         
-        print(f"Converted {len(episodes)} episodes to {len(all_sft)} SFT examples")
-        print(f"Saved to {output_path}")
+        logger.info(f"Converted {len(episodes)} episodes to {len(all_sft)} SFT examples")
+        logger.info(f"Saved to {output_path}")
         
         return str(output_path)

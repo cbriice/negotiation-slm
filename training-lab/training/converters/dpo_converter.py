@@ -2,12 +2,16 @@
 DPO (Direct Preference Optimization) format converter.
 """
 
+import logging
 from typing import Dict, Any, List, Optional, Tuple
 from pathlib import Path
 from collections import defaultdict
 import random
 from training.converters.base import BaseConverter
 from training.converters.scoring import EpisodeScorer
+
+# Set up logging
+logger = logging.getLogger(__name__)
 
 
 class DPOConverter(BaseConverter):
@@ -53,7 +57,7 @@ class DPOConverter(BaseConverter):
         
         # Ensure good score is better
         if good_score <= bad_score:
-            print(f"Warning: Good score ({good_score:.2f}) not better than bad ({bad_score:.2f})")
+            logger.warning(f"Good score ({good_score:.2f}) not better than bad ({bad_score:.2f})")
             if good_score < bad_score:
                 # Swap episodes
                 good_episode, bad_episode = bad_episode, good_episode
@@ -224,8 +228,8 @@ class DPOConverter(BaseConverter):
         
         self.save_jsonl(all_pairs, output_path)
         
-        print(f"Created {len(all_pairs)} DPO pairs from {num_pairs} episode pairs")
-        print(f"Saved to {output_path}")
+        logger.info(f"Created {len(all_pairs)} DPO pairs from {num_pairs} episode pairs")
+        logger.info(f"Saved to {output_path}")
         
         return str(output_path)
     
@@ -278,7 +282,7 @@ class DPOConverter(BaseConverter):
         
         self.save_jsonl(all_pairs, output_path)
         
-        print(f"Auto-generated {len(all_pairs)} DPO pairs")
-        print(f"Saved to {output_path}")
+        logger.info(f"Auto-generated {len(all_pairs)} DPO pairs")
+        logger.info(f"Saved to {output_path}")
         
         return str(output_path)

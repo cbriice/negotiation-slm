@@ -4,11 +4,15 @@ Provides state seeds and scenarios optimized for self-play training.
 """
 
 import json
+import logging
 import random
 from typing import Dict, Any, List, Optional
 from pathlib import Path
 
 from tasks.negotiation_teacher import NegotiationJSONTeacher
+
+# Set up logging
+logger = logging.getLogger(__name__)
 
 
 class SelfPlayTeacher(NegotiationJSONTeacher):
@@ -107,7 +111,7 @@ class SelfPlayTeacher(NegotiationJSONTeacher):
                             self.state_seeds.append(seed)
                         except json.JSONDecodeError:
                             continue
-            print(f"Loaded {len(self.state_seeds)} state seeds")
+            logger.info(f"Loaded {len(self.state_seeds)} state seeds")
         else:
             # Generate default seeds if file doesn't exist
             self.state_seeds = self._generate_default_seeds()
@@ -209,7 +213,7 @@ class SelfPlayTeacher(NegotiationJSONTeacher):
         with open(filepath, 'w') as f:
             for seed in self.state_seeds:
                 f.write(json.dumps(seed) + '\n')
-        print(f"Saved {len(self.state_seeds)} state seeds to {filepath}")
+        logger.info(f"Saved {len(self.state_seeds)} state seeds to {filepath}")
     
     def _select_regression_seeds(self):
         """Select subset of seeds for regression testing."""
@@ -219,7 +223,7 @@ class SelfPlayTeacher(NegotiationJSONTeacher):
         
         num_regression = max(1, int(len(self.state_seeds) * self.regression_ratio))
         self.regression_seeds = random.sample(self.state_seeds, num_regression)
-        print(f"Selected {len(self.regression_seeds)} seeds for regression testing")
+        logger.info(f"Selected {len(self.regression_seeds)} seeds for regression testing")
     
     def _mutate_seed(self, seed: Dict[str, Any]) -> Dict[str, Any]:
         """Apply random mutations to a seed."""

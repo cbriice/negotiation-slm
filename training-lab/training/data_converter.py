@@ -4,6 +4,7 @@ Coordinates conversion between ParlAI episodes and training formats.
 """
 
 import argparse
+import logging
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
@@ -11,6 +12,23 @@ from training.converters.sft_converter import SFTConverter
 from training.converters.dpo_converter import DPOConverter
 from training.converters.builtin_export import BuiltinTaskExporter
 from training.converters.scoring import EpisodeScorer
+
+# Set up logging
+from pathlib import Path
+
+# Ensure logs directory exists
+Path('logs').mkdir(exist_ok=True)
+
+# Configure logging with 'w' mode to clear log on each run
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('logs/data_converter.log', mode='w'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
 
 
 class DataConverter:
@@ -160,16 +178,16 @@ class DataConverter:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         self.sft_converter.save_jsonl(scored_episodes, output_path)
         
-        # Print statistics
-        print(f"\nScored {len(scored_episodes)} episodes:")
+        # Log statistics
+        logger.info(f"Scored {len(scored_episodes)} episodes:")
         tiers = {'excellent': 0, 'good': 0, 'fair': 0, 'poor': 0}
         for ep in scored_episodes:
             tiers[ep['quality_tier']] += 1
         
         for tier, count in tiers.items():
-            print(f"  {tier}: {count} episodes")
+            logger.info(f"  {tier}: {count} episodes")
         
-        print(f"\nSaved to {output_path}")
+        logger.info(f"Saved to {output_path}")
         return str(output_path)
     
     def prepare_training_data(self,
@@ -195,31 +213,31 @@ class DataConverter:
         results = {}
         
         # 1. Score episodes
-        print("\n1. Scoring episodes...")
+        logger.info("1. Scoring episodes...")
         scored_file = str(base_dir / "scored_episodes.jsonl")
         scored_file = self.score_episodes(episodes_file, scored_file)
         results['scored_episodes'] = scored_file
         
         # 2. Convert all to SFT
-        print("\n2. Converting to SFT format...")
+        logger.info("2. Converting to SFT format...")
         sft_file = str(base_dir / "sft" / "all_episodes.jsonl")
         sft_file = self.convert_episodes_to_sft(scored_file, sft_file)
         results['sft_all'] = sft_file
         
         # 3. Filter high-quality SFT
-        print("\n3. Filtering high-quality SFT examples...")
+        logger.info("3. Filtering high-quality SFT examples...")
         sft_good = str(base_dir / "sft" / "high_quality.jsonl")
         sft_good = self.sft_converter.filter_by_quality(sft_file, 8.0, sft_good)
         results['sft_high_quality'] = sft_good
         
         # 4. Auto-generate DPO pairs
-        print("\n4. Generating DPO pairs...")
+        logger.info("4. Generating DPO pairs...")
         dpo_file = str(base_dir / "dpo" / "auto_pairs.jsonl")
         dpo_file = self.auto_generate_dpo(scored_file, dpo_file)
         results['dpo_pairs'] = dpo_file
         
-        print("\n✓ Training data preparation complete!")
-        print(f"  Output directory: {base_dir}")
+        logger.info("✓ Training data preparation complete!")
+        logger.info(f"  Output directory: {base_dir}")
         
         return results
 
@@ -287,37 +305,37 @@ def main():
         result = converter.convert_episodes_to_sft(
             args.input, args.output, args.history_window
         )
-        print(f"SFT conversion complete: {result}")
+        logger.info(f"SFT conversion complete: {result}")
     
     elif args.command == 'dpo':
         result = converter.create_dpo_pairs(
             args.good, args.bad, args.output, args.max_pairs
         )
-        print(f"DPO pairs created: {result}")
+        logger.info(f"DPO pairs created: {result}")
     
     elif args.command == 'auto-dpo':
         result = converter.auto_generate_dpo(
             args.input, args.output, args.threshold
         )
-        print(f"Auto-generated DPO pairs: {result}")
+        logger.info(f"Auto-generated DPO pairs: {result}")
     
     elif args.command == 'builtin':
         results = converter.export_builtin_tasks(
             args.tasks, args.max_episodes, not args.no_sft
         )
-        print("\nExported files:")
+        logger.info("Exported files:")
         for name, path in results.items():
-            print(f"  {name}: {path}")
+            logger.info(f"  {name}: {path}")
     
     elif args.command == 'score':
         result = converter.score_episodes(args.input, args.output)
-        print(f"Scored episodes: {result}")
+        logger.info(f"Scored episodes: {result}")
     
     elif args.command == 'prepare':
         results = converter.prepare_training_data(args.input, args.output_dir)
-        print("\nGenerated files:")
+        logger.info("Generated files:")
         for name, path in results.items():
-            print(f"  {name}: {path}")
+            logger.info(f"  {name}: {path}")
     
     else:
         parser.print_help()
