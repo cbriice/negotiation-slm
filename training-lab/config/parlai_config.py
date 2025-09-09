@@ -4,7 +4,7 @@ from typing import Dict, Any, Optional
 BASE_DIR = Path(__file__).parent.parent
 
 PARLAI_CONFIG = {
-    'model': 'agents.hf_wrapper:HFNegotiator',
+    'model': 'agents.ollama_wrapper:OllamaNegotiator',
     'task': 'tasks.negotiation_teacher:NegotiationTeacher',
     'datapath': str(BASE_DIR / 'data'),
     'batchsize': 1,  # Start with 1 for debugging, increase for production
