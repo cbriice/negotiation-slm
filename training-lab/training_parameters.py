@@ -7,6 +7,7 @@ MAX_SEQ_LEN: int = 1536
 PER_DEVICE_BATCH_SIZE: int = 1
 GRAD_ACCUM_STEPS: int = 8
 SEED: int = 42
+MODEL_TEMP: float = 0.5  # Temperature for model generation
 
 # QLoRA quantization
 LOAD_IN_4BIT: bool = True

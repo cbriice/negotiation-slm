@@ -78,7 +78,7 @@ class OllamaNegotiator(NegotiatorBase):
         # Model configuration
         self.model_name = opt.get('model_name', 'mistral:7b')
         self.ollama_host = opt.get('ollama_host', 'http://localhost:11434')
-        self.temperature = opt.get('temperature', 0.7)
+        self.temperature = opt.get('temperature', 0.5)
         self.top_p = opt.get('top_p', 0.9)
         self.max_tokens = opt.get('max_tokens', 256)
         self.timeout = opt.get('timeout', 30)

@@ -13,9 +13,12 @@ from datetime import datetime
 from copy import deepcopy
 
 import pandas as pd
+import numpy as np
 from parlai.core.worlds import World
 from parlai.core.params import ParlaiParser
 from parlai.core.opt import Opt
+
+from training_parameters import MODEL_TEMP
 
 from agents.ollama_wrapper import OllamaNegotiator
 from agents.negotiator_base import NegotiationState, NegotiationAction
@@ -86,7 +89,7 @@ class SelfChatWorld(World):
         group.add_argument(
             '--temperature',
             type=float,
-            default=0.7,
+            default=MODEL_TEMP,
             help='Temperature for generation'
         )
         group.add_argument(
@@ -244,7 +247,7 @@ class SelfChatWorld(World):
             'meta': {
                 'model_version': 'mistral-7b-v0.1',
                 'lora_checkpoint': self.opt.get('model_checkpoint'),
-                'temperature': self.opt.get('temperature', 0.7),
+                'temperature': self.opt.get('temperature', MODEL_TEMP),
                 'is_regression_seed': is_regression,
                 'was_mutated': was_mutated,
                 'batch_id': f"batch_{self.current_batch:03d}",
@@ -622,6 +625,23 @@ class SelfChatWorld(World):
         
         return aggregates
     
+    def _convert_to_native(self, obj):
+        """Convert NumPy types to native Python types for JSON serialization."""
+        if isinstance(obj, dict):
+            return {k: self._convert_to_native(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [self._convert_to_native(item) for item in obj]
+        elif isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif pd.isna(obj):
+            return None
+        else:
+            return obj
+    
     def shutdown(self):
         """Clean up and save final data."""
         # Save any remaining episodes
@@ -644,10 +664,10 @@ class SelfChatWorld(World):
                     'max_turns': self.max_turns,
                     'seed_mutation_rate': self.seed_mutation_rate,
                     'regression_ratio': self.regression_ratio,
-                    'temperature': self.opt.get('temperature', 0.7),
+                    'temperature': self.opt.get('temperature', MODEL_TEMP),
                     'model_checkpoint': self.opt.get('model_checkpoint')
                 },
-                'summary_statistics': self.session_metrics['aggregate_stats'],
+                'summary_statistics': self._convert_to_native(self.session_metrics['aggregate_stats']),
                 'timestamp': datetime.now().isoformat()
             }
             

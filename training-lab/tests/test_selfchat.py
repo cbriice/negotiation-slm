@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from parlai.core.params import ParlaiParser
 from worlds.selfchat_world import SelfChatWorld
+from training_parameters import MODEL_TEMP
 from agents.ollama_wrapper import OllamaNegotiator
 
 # Set up logging
@@ -38,7 +39,7 @@ def test_selfchat():
         '--max-turns', '10',
         '--output-dir', 'data/test_selfchat/',
         '--model-name', 'mistral:7b',
-        '--temperature', '0.7',
+        '--temperature', str(MODEL_TEMP),
         '--ollama-host', 'http://localhost:11434',
         '--save-metrics-every', '2'
     ])

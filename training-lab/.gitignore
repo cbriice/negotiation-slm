@@ -4,3 +4,4 @@ __pycache__/
 .env
 .env*
 .venv310/
+data/

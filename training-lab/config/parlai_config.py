@@ -1,5 +1,6 @@
 from pathlib import Path
 from typing import Dict, Any, Optional
+from training_parameters import MODEL_TEMP
 
 BASE_DIR = Path(__file__).parent.parent
 
@@ -11,7 +12,7 @@ PARLAI_CONFIG = {
     'max_turns': 20,
     'truncate': 1536,  # Match MAX_SEQ_LEN from training_parameters.py
     'history_size': 5,  # Number of previous turns to include in context
-    'temperature': 0.7,
+    'temperature': MODEL_TEMP,
     'top_p': 0.9,
     'max_new_tokens': 256,
 }
