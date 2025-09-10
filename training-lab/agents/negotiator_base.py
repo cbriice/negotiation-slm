@@ -36,6 +36,10 @@ class NegotiatorBase(Agent):
         self.turn_count = 0
         self.max_turns = opt.get('max_turns', 20)
         
+        # Strategy tracking for two-part response
+        self.strategy_history: List[Dict[str, Any]] = []
+        self.current_strategy: Optional[Dict[str, Any]] = None
+        
         # Role-specific state (populated by initialize_from_state)
         self.role_state: Dict[str, Any] = {}
         

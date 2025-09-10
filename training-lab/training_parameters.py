@@ -50,6 +50,12 @@ DPO_BETA: float = 0.1               # preference sharpness
 DPO_LABEL_SMOOTH: float = 0.0
 DPO_MAX_PROMPT_LEN: int = min(512, MAX_SEQ_LEN // 2)
 
+# Two-part response parameters
+USE_TWO_PART_RESPONSE: bool = True
+STRATEGY_MAX_TOKENS: int = 150
+RESPONSE_MAX_TOKENS: int = 256
+STRATEGY_TEMPERATURE: float = 0.3  # Lower temp for strategy generation
+
 # validation - make sure parameters aren't changed to outrageous values
 def validate():
     assert 256 <= MAX_SEQ_LEN <= 4096, "MAX_SEQ_LEN out of sane range"
