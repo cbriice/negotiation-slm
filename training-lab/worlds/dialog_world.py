@@ -518,6 +518,10 @@ class DialogPartnerWorld(World):
         self.batch_episodes.append(episode)
         logger.debug(f"Added to batch, current batch size: {len(self.batch_episodes)}")
         
+        # Save transcript immediately
+        self._save_transcript(episode)
+        logger.debug(f"Transcript saved for episode {episode['episode_id']}")
+        
         # Update session metrics
         self._update_session_metrics(episode)
         logger.debug("Session metrics updated")
@@ -645,6 +649,79 @@ class DialogPartnerWorld(World):
             json.dump(metrics_data, f, indent=2)
         
         logger.info(f"Saved metrics for {self.episode_count} episodes")
+    
+    def _save_transcript(self, episode: Dict[str, Any]):
+        """Save human-readable transcript of the episode."""
+        transcript_file = self.transcripts_dir / f"{episode['episode_id']}_transcript.txt"
+        
+        with open(transcript_file, 'w') as f:
+            # Write header
+            f.write("=" * 80 + "\n")
+            f.write(f"NEGOTIATION TRANSCRIPT\n")
+            f.write(f"Episode ID: {episode['episode_id']}\n")
+            f.write(f"Dialogue ID: {episode['dialogue_id']}\n")
+            f.write(f"Timestamp: {datetime.now().isoformat()}\n")
+            f.write("=" * 80 + "\n\n")
+            
+            # Write scenario info
+            meta = episode['meta']
+            f.write(f"SCENARIO:\n")
+            f.write(f"  Agent Side: {meta['agent_side']}\n")
+            f.write(f"  Partner Side: {meta['partner_side']}\n")
+            if self.partner_mode == 'rule':
+                f.write(f"  Partner Persona: {meta.get('partner_persona', 'unknown')}\n")
+            
+            # Write item info
+            state = episode['state']
+            item = state.get('item', {})
+            f.write(f"\nITEM:\n")
+            f.write(f"  Name: {item.get('name', 'Unknown')}\n")
+            f.write(f"  List Price: ${item.get('list_price', 0)}\n")
+            
+            # Write negotiation parameters
+            f.write(f"\nNEGOTIATION PARAMETERS:\n")
+            if 'buyer_state' in state:
+                buyer = state['buyer_state']
+                f.write(f"  Buyer Max Price: ${buyer.get('max_price', 0)}\n")
+                f.write(f"  Buyer Target Price: ${buyer.get('target_price', 0)}\n")
+            if 'seller_state' in state:
+                seller = state['seller_state']
+                f.write(f"  Seller Min Price: ${seller.get('min_price', 0)}\n")
+                f.write(f"  Seller Target Price: ${seller.get('target_price', 0)}\n")
+            
+            f.write("\n" + "=" * 80 + "\n")
+            f.write("DIALOGUE:\n")
+            f.write("=" * 80 + "\n\n")
+            
+            # Write dialogue
+            for turn in episode['dialogue']:
+                speaker = turn['speaker'].upper()
+                action = f"[{turn['action']}]" if turn['action'] else ""
+                f.write(f"Turn {turn['turn']} - {speaker} {action}:\n")
+                f.write(f"{turn['text']}\n")
+                f.write("-" * 40 + "\n\n")
+            
+            # Write outcome
+            metrics = episode['metrics']
+            f.write("=" * 80 + "\n")
+            f.write("OUTCOME:\n")
+            f.write("=" * 80 + "\n")
+            f.write(f"  Deal Closed: {'Yes' if metrics['deal_closed'] else 'No'}\n")
+            if metrics['final_price']:
+                f.write(f"  Final Price: ${metrics['final_price']}\n")
+            f.write(f"  Total Turns: {metrics['turns']}\n")
+            f.write(f"  Duration: {metrics['duration_seconds']:.2f} seconds\n")
+            f.write(f"  Total Tokens: {metrics['tokens_total']}\n")
+            
+            # Write action distribution
+            if metrics.get('action_distribution'):
+                f.write(f"\nAction Distribution:\n")
+                for action, count in metrics['action_distribution'].items():
+                    f.write(f"  {action}: {count}\n")
+            
+            f.write("\n" + "=" * 80 + "\n")
+            f.write("END OF TRANSCRIPT\n")
+            f.write("=" * 80 + "\n")
     
     def parley(self):
         """Execute one episode (ParlAI interface)."""

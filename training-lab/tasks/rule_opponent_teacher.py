@@ -78,6 +78,10 @@ class RuleOpponentTeacher(NegotiationJSONTeacher):
         # Initialize parent
         super().__init__(opt, shared)
         
+        # Create transcripts directory
+        self.transcripts_dir = self.data_dir / 'transcripts'
+        self.transcripts_dir.mkdir(parents=True, exist_ok=True)
+        
         # Rule opponent specific configuration
         self.persona_selection = opt.get('persona_selection', 'random')
         self.persona_intensity = opt.get('persona_intensity', 0.5)
