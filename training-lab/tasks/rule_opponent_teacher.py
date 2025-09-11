@@ -28,6 +28,9 @@ class RuleOpponentTeacher(NegotiationJSONTeacher):
     @classmethod
     def add_cmdline_args(cls, parser, partial_opt=None):
         """Add command-line arguments for rule opponent teacher."""
+        # Ensure partial_opt is not None for parent class
+        if partial_opt is None:
+            partial_opt = {}
         super().add_cmdline_args(parser, partial_opt)
         agent = parser.add_argument_group('Rule Opponent Teacher Arguments')
         agent.add_argument(

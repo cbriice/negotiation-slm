@@ -11,6 +11,7 @@ from training_parameters import (
     USE_TWO_PART_RESPONSE, STRATEGY_MAX_TOKENS, RESPONSE_MAX_TOKENS,
     STRATEGY_TEMPERATURE, MODEL_TEMP
 )
+from worlds.dialogue_flow import DialogueFlowManager
 
 # Set up logging for agent-related logs
 Path('logs').mkdir(exist_ok=True)
@@ -20,8 +21,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('logs/agent_logs.log', mode='w'),
-        logging.StreamHandler()
+        logging.FileHandler('logs/agent_logs.log', mode='w')
     ]
 )
 logger = logging.getLogger(__name__)
@@ -48,7 +48,7 @@ class OllamaNegotiator(NegotiatorBase):
         agent.add_argument(
             '--temperature',
             type=float,
-            default=0.7,
+            default=MODEL_TEMP,  # Use 0.5 from training_parameters.py
             help='Temperature for generation'
         )
         agent.add_argument(
@@ -97,6 +97,9 @@ class OllamaNegotiator(NegotiatorBase):
         
         # Enhanced token tracking
         self.token_metrics = TokenMetrics()
+        
+        # Dialogue flow manager for prompt generation
+        self.dialogue_flow = DialogueFlowManager()
         
         # Test connection to Ollama
         self._test_connection()
@@ -173,89 +176,29 @@ class OllamaNegotiator(NegotiatorBase):
         return "\n".join(prompt_parts)
     
     def _build_response_prompt(self, strategy: Dict[str, Any]) -> str:
-        """Build the prompt for response generation given a strategy."""
-        prompt_parts = []
+        """Build the prompt for response generation using dialogue flow manager."""
+        # Extract action from strategy
+        action = self.dialogue_flow.parse_strategy_action(strategy)
+        if not action or not self.dialogue_flow.validate_action(action):
+            logging.warning('Fallback triggered - using PROPOSE tag instead of strategy generated tag.')
+            action = 'PROPOSE'
+            strategy['action_indicator'] = action
         
-        # Role
-        side = self.side if self.side else "negotiator"
-        prompt_parts.append(f"You are a {side} in a negotiation.")
-        prompt_parts.append("")
+        # Build context for dialogue flow manager
+        context = {
+            'side': self.side if self.side else "negotiator",
+            'state': self.current_state,
+            'history': self.negotiation_history[-5:] if self.negotiation_history else [],
+            'dialogue_id': getattr(self, 'dialogue_id', 'unknown'),
+            'turn': self.turn_count
+        }
         
-        # Strategy to follow
-        prompt_parts.append("Your strategy:")
-        prompt_parts.append(f"- Action: {strategy.get('action_indicator', 'PROPOSE')}")
-        prompt_parts.append(f"- Target price: ${strategy.get('target_price', 0)}")
-        prompt_parts.append(f"- Tone: {strategy.get('tone', 'reasonable')}")
+        # Check if we need partner's terms for ACK
+        if action == 'ACK' and hasattr(self, 'terms_buffer'):
+            context['partner_terms'] = self.terms_buffer
         
-        tactics = strategy.get('tactics', [])
-        if tactics:
-            prompt_parts.append(f"- Tactics: {', '.join(tactics)}")
-        
-        # Partner's last message
-        if hasattr(self, 'observation') and self.observation and 'text' in self.observation:
-            prompt_parts.append("")
-            prompt_parts.append(f'Partner\'s last message: "{self.observation["text"]}"')
-        
-        # Instructions
-        prompt_parts.append("")
-        prompt_parts.append("Generate a negotiation response that:")
-        prompt_parts.append(f"1. Follows the {strategy.get('action_indicator', 'PROPOSE')} action")
-        prompt_parts.append(f"2. Maintains a {strategy.get('tone', 'reasonable')} tone")
-        prompt_parts.append(f"3. Works toward ${strategy.get('target_price', 0)}")
-        
-        if tactics:
-            prompt_parts.append(f"4. Uses these tactics: {tactics}")
-        
-        prompt_parts.append("")
-        prompt_parts.append(f"Start with [{strategy.get('action_indicator', 'PROPOSE')}] tag.")
-        
-        return "\n".join(prompt_parts)
-    
-    def _build_prompt(self) -> str:
-        """Build the prompt for the model based on negotiation context."""
-        prompt_parts = []
-        
-        # Add role and state information
-        if self.current_state:
-            side = self.side if self.side else "negotiator"
-            prompt_parts.append(f"You are a {side} in a negotiation.")
-            
-            # Add item information
-            if 'item' in self.current_state:
-                item = self.current_state['item']
-                prompt_parts.append(f"Item: {item.get('name', 'Unknown')}")
-                prompt_parts.append(f"Condition: {item.get('condition', 'Unknown')}")
-                prompt_parts.append(f"List Price: ${item.get('list_price', 0)}")
-            
-            # Add role-specific constraints
-            if self.role_state:
-                if self.side == 'buyer':
-                    max_price = self.role_state.get('max_price', 0)
-                    target_price = self.role_state.get('target_price', 0)
-                    prompt_parts.append(f"Your maximum price: ${max_price}")
-                    prompt_parts.append(f"Your target price: ${target_price}")
-                elif self.side == 'seller':
-                    min_price = self.role_state.get('min_price', 0)
-                    prompt_parts.append(f"Your minimum price: ${min_price}")
-        
-        # Add conversation history
-        if self.negotiation_history:
-            prompt_parts.append("\nConversation history:")
-            # Take last 5 turns for context
-            recent_history = self.negotiation_history[-5:]
-            for turn in recent_history:
-                role = "You" if turn.get('is_self', False) else "Partner"
-                prompt_parts.append(f"{role}: {turn.get('text', '')}")
-        
-        # Add current observation
-        if hasattr(self, 'observation') and self.observation:
-            if 'text' in self.observation and self.observation['text']:
-                prompt_parts.append(f"\nPartner: {self.observation['text']}")
-        
-        # Add instruction for response
-        prompt_parts.append("\nYour response (use [PROPOSE], [COMMIT], [ACK], [NACK], or [NO_DEAL]):")
-        
-        return "\n".join(prompt_parts)
+        # Use dialogue flow manager's response prompt generation
+        return self.dialogue_flow.generate_response_prompt(strategy, action, context)
     
     def _parse_model_output(self, output: str) -> Tuple[Optional[NegotiationAction], str]:
         """Parse model output to extract action and clean text."""
@@ -322,8 +265,10 @@ class OllamaNegotiator(NegotiatorBase):
             return fallback, 0, len(fallback.split())
     
     def generate_strategy(self) -> Dict[str, Any]:
-        """Generate a negotiation strategy."""
+        """Generate a negotiation strategy using internal prompt generation."""
+        # Always use internal prompt generation
         prompt = self._build_strategy_prompt()
+            
         start_time = time.time()
         
         # Generate with lower temperature for more consistent strategies
@@ -371,8 +316,17 @@ class OllamaNegotiator(NegotiatorBase):
         return strategy
     
     def generate_response(self, strategy: Dict[str, Any]) -> str:
-        """Generate a response based on the strategy."""
+        """Generate a response based on strategy using internal prompt generation.
+        
+        Args:
+            strategy: Strategy dict containing action_indicator and other details
+            
+        Returns:
+            Generated response text
+        """
+        # Generate prompt internally based on strategy
         prompt = self._build_response_prompt(strategy)
+        
         start_time = time.time()
         
         # Generate response
@@ -389,8 +343,12 @@ class OllamaNegotiator(NegotiatorBase):
             prompt_tokens, output_tokens, duration_ms
         )
         
+        # Extract action indicator from strategy
+        action_indicator = 'PROPOSE'  # default
+        if strategy and isinstance(strategy, dict):
+            action_indicator = strategy.get('action_indicator', 'PROPOSE')
+        
         # Ensure response has the correct action tag
-        action_indicator = strategy.get('action_indicator', 'PROPOSE')
         if f"[{action_indicator}]" not in response_text:
             response_text = f"[{action_indicator}] {response_text}"
         
@@ -430,17 +388,18 @@ class OllamaNegotiator(NegotiatorBase):
                     action = act
                     break
         else:
-            # Legacy single-step generation
-            prompt = self._build_prompt()
-            response_text, prompt_tokens, output_tokens = self._generate_response(prompt)
-            response = response_text  # Just use the text part
+            # Legacy single-step generation - generate strategy then response
+            strategy = self.generate_strategy()
+            self.current_strategy = strategy
+            response = self.generate_response(strategy)
             
-            # Parse action and text
-            action, text = self._parse_model_output(response)
-            
-            # Format response with proper action tag if needed
-            if action and action.value not in response:
-                response = self.format_response(text, action)
+            # Parse action from strategy
+            action_str = strategy.get('action_indicator', 'PROPOSE')
+            action = None
+            for act in NegotiationAction:
+                if act.value == f"[{action_str}]":
+                    action = act
+                    break
         
         # Update our state
         if action:
