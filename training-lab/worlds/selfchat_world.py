@@ -117,8 +117,9 @@ class SelfChatWorld(World):
         self.episodes_dir = self.output_dir / 'episodes'
         self.metrics_dir = self.output_dir / 'metrics'
         self.seeds_dir = self.output_dir / 'seeds'
+        self.transcripts_dir = self.output_dir / 'transcripts'
         
-        for dir_path in [self.episodes_dir, self.metrics_dir, self.seeds_dir]:
+        for dir_path in [self.episodes_dir, self.metrics_dir, self.seeds_dir, self.transcripts_dir]:
             dir_path.mkdir(parents=True, exist_ok=True)
         
         # Initialize teacher for state seeds
@@ -506,8 +507,86 @@ class SelfChatWorld(World):
         """Check if we've generated enough episodes."""
         return self.episode_count >= self.target_episodes
     
+    def _save_transcript(self, episode: Dict[str, Any]):
+        """Save human-readable transcript of the episode."""
+        transcript_file = self.transcripts_dir / f"{episode['episode_id']}_transcript.txt"
+        
+        with open(transcript_file, 'w') as f:
+            # Write header
+            f.write("=" * 80 + "\n")
+            f.write(f"SELFCHAT NEGOTIATION TRANSCRIPT\n")
+            f.write(f"Episode ID: {episode['episode_id']}\n")
+            f.write(f"Dialogue ID: {episode['dialogue_id']}\n")
+            f.write(f"Timestamp: {datetime.now().isoformat()}\n")
+            f.write("=" * 80 + "\n\n")
+            
+            # Write scenario info
+            meta = episode['meta']
+            f.write(f"SCENARIO:\n")
+            f.write(f"  Seed ID: {meta.get('seed_id', 'Unknown')}\n")
+            f.write(f"  Is Regression Seed: {meta.get('is_regression_seed', False)}\n")
+            
+            # Write item info
+            state = episode['state']
+            item = state.get('item', {})
+            f.write(f"\nITEM:\n")
+            f.write(f"  Name: {item.get('name', 'Unknown')}\n")
+            f.write(f"  List Price: ${item.get('list_price', 0)}\n")
+            
+            # Write negotiation parameters
+            f.write(f"\nNEGOTIATION PARAMETERS:\n")
+            if 'buyer_state' in state:
+                buyer = state['buyer_state']
+                f.write(f"  Buyer Max Price: ${buyer.get('max_price', 0)}\n")
+                f.write(f"  Buyer Target Price: ${buyer.get('target_price', 0)}\n")
+            if 'seller_state' in state:
+                seller = state['seller_state']
+                f.write(f"  Seller Min Price: ${seller.get('min_price', 0)}\n")
+                f.write(f"  Seller Target Price: ${seller.get('target_price', 0)}\n")
+            
+            f.write("\n" + "=" * 80 + "\n")
+            f.write("DIALOGUE:\n")
+            f.write("=" * 80 + "\n\n")
+            
+            # Write dialogue
+            for turn in episode['dialogue']:
+                speaker = turn['speaker'].upper()
+                action = f"[{turn['action']}]" if turn['action'] else ""
+                f.write(f"Turn {turn['turn']} - {speaker} {action}:\n")
+                f.write(f"{turn['text']}\n")
+                f.write("-" * 40 + "\n\n")
+            
+            # Write outcome
+            metrics = episode['metrics']
+            f.write("=" * 80 + "\n")
+            f.write("OUTCOME:\n")
+            f.write("=" * 80 + "\n")
+            f.write(f"  Deal Closed: {'Yes' if metrics['deal_closed'] else 'No'}\n")
+            if metrics.get('final_price'):
+                f.write(f"  Final Price: ${metrics['final_price']}\n")
+            f.write(f"  Total Turns: {metrics['turns']}\n")
+            f.write(f"  Duration: {metrics['duration_seconds']:.2f} seconds\n")
+            f.write(f"  Total Tokens: {metrics['total_tokens']}\n")
+            
+            # Write action distribution
+            if metrics.get('action_distribution'):
+                f.write(f"\nAction Distribution:\n")
+                for action, count in metrics['action_distribution'].items():
+                    f.write(f"  {action}: {count}\n")
+            
+            # Write protocol violations if any
+            if metrics.get('protocol_violations'):
+                f.write(f"\nProtocol Violations: {metrics['protocol_violations']}\n")
+            
+            f.write("\n" + "=" * 80 + "\n")
+            f.write("END OF TRANSCRIPT\n")
+            f.write("=" * 80 + "\n")
+    
     def log_episode(self, episode: Dict[str, Any]):
         """Write episode to JSONL file."""
+        # Save transcript first
+        self._save_transcript(episode)
+        
         # Immediate write to current batch file
         batch_file = self.episodes_dir / f"selfchat_batch_{self.current_batch:03d}.jsonl"
         
