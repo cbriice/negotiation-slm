@@ -286,3 +286,235 @@ class DPOConverter(BaseConverter):
         logger.info(f"Saved to {output_path}")
         
         return str(output_path)
+    
+    def create_strategy_dpo_pair(self,
+                                good_episode: Dict[str, Any],
+                                bad_episode: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """
+        Create DPO pairs comparing strategy generation quality.
+        
+        Args:
+            good_episode: Episode with good strategy generation
+            bad_episode: Episode with poor strategy generation
+        
+        Returns:
+            List of strategy-focused DPO pairs
+        """
+        dpo_pairs = []
+        
+        good_dialogue = good_episode.get('dialogue', [])
+        bad_dialogue = bad_episode.get('dialogue', [])
+        good_meta = good_episode.get('meta', {})
+        bad_meta = bad_episode.get('meta', {})
+        state = good_episode.get('state', {})
+        
+        # Align turns
+        aligned_pairs = self._align_by_index(good_dialogue, bad_dialogue)
+        
+        for good_turn, bad_turn, turn_idx in aligned_pairs:
+            # Skip if either lacks strategy data
+            if 'strategy_generation' not in good_turn or 'strategy_generation' not in bad_turn:
+                continue
+            
+            good_strategy = good_turn['strategy_generation'].get('strategy', '{}')
+            bad_strategy = bad_turn['strategy_generation'].get('strategy', '{}')
+            
+            # Skip if strategies are identical
+            if good_strategy == bad_strategy:
+                continue
+            
+            # Build history
+            history = self.extract_dialogue_history(good_dialogue, turn_idx)
+            partner_msg = good_turn.get('text', '')
+            
+            dpo_example = {
+                "context": {
+                    "task": "strategy_generation",
+                    "state": state,
+                    "recent_convo": history,
+                    "partner_msg": partner_msg,
+                    "current_side": good_turn.get('side', good_meta.get('side', 'buyer')),
+                    "turn_number": turn_idx
+                },
+                "chosen": good_strategy,
+                "rejected": bad_strategy,
+                "meta": {
+                    "phase": "strategy",
+                    "chosen_episode_id": good_meta.get('episode_id', ''),
+                    "rejected_episode_id": bad_meta.get('episode_id', ''),
+                    "turn": turn_idx,
+                    "chosen_deal_closed": good_meta.get('deal_closed', False),
+                    "rejected_deal_closed": bad_meta.get('deal_closed', False)
+                }
+            }
+            
+            dpo_pairs.append(dpo_example)
+        
+        return dpo_pairs
+    
+    def create_response_dpo_pair(self,
+                                 good_episode: Dict[str, Any],
+                                 bad_episode: Dict[str, Any],
+                                 use_same_strategy: bool = False) -> List[Dict[str, Any]]:
+        """
+        Create DPO pairs comparing response generation quality.
+        
+        Args:
+            good_episode: Episode with good response generation
+            bad_episode: Episode with poor response generation
+            use_same_strategy: If True, compare responses with same strategy
+        
+        Returns:
+            List of response-focused DPO pairs
+        """
+        dpo_pairs = []
+        
+        good_dialogue = good_episode.get('dialogue', [])
+        bad_dialogue = bad_episode.get('dialogue', [])
+        good_meta = good_episode.get('meta', {})
+        bad_meta = bad_episode.get('meta', {})
+        state = good_episode.get('state', {})
+        
+        # Align turns
+        aligned_pairs = self._align_by_index(good_dialogue, bad_dialogue)
+        
+        for good_turn, bad_turn, turn_idx in aligned_pairs:
+            # Skip if either lacks response data
+            if 'response_generation' not in good_turn or 'response_generation' not in bad_turn:
+                continue
+            
+            good_response = good_turn['response_generation'].get('response', '')
+            bad_response = bad_turn['response_generation'].get('response', '')
+            
+            # Skip if responses are identical
+            if good_response == bad_response:
+                continue
+            
+            # Get strategies
+            good_strategy = good_turn.get('strategy_generation', {}).get('strategy', '{}')
+            bad_strategy = bad_turn.get('strategy_generation', {}).get('strategy', '{}')
+            
+            # If using same strategy, pick the good strategy for both
+            if use_same_strategy:
+                strategy_to_use = good_strategy
+            else:
+                strategy_to_use = good_strategy  # Use good strategy as context
+            
+            # Build history
+            history = self.extract_dialogue_history(good_dialogue, turn_idx)
+            partner_msg = good_turn.get('text', '')
+            
+            dpo_example = {
+                "context": {
+                    "task": "response_generation",
+                    "state": state,
+                    "recent_convo": history,
+                    "partner_msg": partner_msg,
+                    "strategy": strategy_to_use,
+                    "current_side": good_turn.get('side', good_meta.get('side', 'buyer')),
+                    "turn_number": turn_idx
+                },
+                "chosen": good_response,
+                "rejected": bad_response,
+                "meta": {
+                    "phase": "response",
+                    "same_strategy": use_same_strategy,
+                    "chosen_episode_id": good_meta.get('episode_id', ''),
+                    "rejected_episode_id": bad_meta.get('episode_id', ''),
+                    "turn": turn_idx,
+                    "chosen_action": good_turn.get('action', 'PROPOSE'),
+                    "rejected_action": bad_turn.get('action', 'PROPOSE'),
+                    "chosen_deal_closed": good_meta.get('deal_closed', False),
+                    "rejected_deal_closed": bad_meta.get('deal_closed', False)
+                }
+            }
+            
+            dpo_pairs.append(dpo_example)
+        
+        return dpo_pairs
+    
+    def batch_create_separated_pairs(self,
+                                    good_episodes_file: str,
+                                    bad_episodes_file: str,
+                                    strategy_output: Optional[str] = None,
+                                    response_output: Optional[str] = None,
+                                    max_pairs: Optional[int] = None) -> Dict[str, str]:
+        """
+        Create separated DPO pairs for strategy and response phases.
+        
+        Args:
+            good_episodes_file: Path to JSONL with good episodes
+            bad_episodes_file: Path to JSONL with bad episodes
+            strategy_output: Optional output path for strategy DPO pairs
+            response_output: Optional output path for response DPO pairs
+            max_pairs: Maximum number of episode pairs to process
+        
+        Returns:
+            Dictionary with paths to strategy and response DPO files
+        """
+        # Load episodes
+        good_episodes = self.load_jsonl(Path(good_episodes_file))
+        bad_episodes = self.load_jsonl(Path(bad_episodes_file))
+        
+        # Determine number of pairs
+        num_pairs = min(len(good_episodes), len(bad_episodes))
+        if max_pairs:
+            num_pairs = min(num_pairs, max_pairs)
+        
+        # Shuffle for variety
+        random.shuffle(good_episodes)
+        random.shuffle(bad_episodes)
+        
+        # Generate separated pairs
+        all_strategy_pairs = []
+        all_response_pairs = []
+        all_response_same_strategy_pairs = []
+        
+        for i in range(num_pairs):
+            # Strategy pairs
+            strategy_pairs = self.create_strategy_dpo_pair(
+                good_episodes[i], bad_episodes[i]
+            )
+            all_strategy_pairs.extend(strategy_pairs)
+            
+            # Response pairs with different strategies
+            response_pairs = self.create_response_dpo_pair(
+                good_episodes[i], bad_episodes[i], use_same_strategy=False
+            )
+            all_response_pairs.extend(response_pairs)
+            
+            # Response pairs with same strategy (for ablation)
+            if i < num_pairs // 3:  # Only do this for 1/3 of pairs
+                same_strategy_pairs = self.create_response_dpo_pair(
+                    good_episodes[i], bad_episodes[i], use_same_strategy=True
+                )
+                all_response_same_strategy_pairs.extend(same_strategy_pairs)
+        
+        # Combine response pairs
+        all_response_pairs.extend(all_response_same_strategy_pairs)
+        
+        # Save strategy pairs
+        if strategy_output is None:
+            strategy_path = self.output_dir / f"dpo_strategy_{len(all_strategy_pairs)}.jsonl"
+        else:
+            strategy_path = Path(strategy_output)
+        
+        self.save_jsonl(all_strategy_pairs, strategy_path)
+        
+        # Save response pairs
+        if response_output is None:
+            response_path = self.output_dir / f"dpo_response_{len(all_response_pairs)}.jsonl"
+        else:
+            response_path = Path(response_output)
+        
+        self.save_jsonl(all_response_pairs, response_path)
+        
+        logger.info(f"Created separated DPO pairs from {num_pairs} episode pairs:")
+        logger.info(f"  - {len(all_strategy_pairs)} strategy pairs -> {strategy_path}")
+        logger.info(f"  - {len(all_response_pairs)} response pairs -> {response_path}")
+        logger.info(f"    ({len(all_response_same_strategy_pairs)} with same strategy)")
+        
+        return {
+            'strategy': str(strategy_path),
+            'response': str(response_path)
+        }

@@ -175,3 +175,167 @@ class SFTConverter(BaseConverter):
         logger.info(f"Saved to {output_path}")
         
         return str(output_path)
+    
+    def episode_to_sft_separated(self,
+                                 episode: Dict[str, Any],
+                                 history_window: int = 5) -> Dict[str, List[Dict[str, Any]]]:
+        """
+        Convert episode to separated SFT format for two-part response training.
+        
+        Args:
+            episode: ParlAI episode dictionary with strategy and response data
+            history_window: Number of recent turns for context
+        
+        Returns:
+            Dictionary with 'strategy' and 'response' SFT example lists
+        """
+        strategy_examples = []
+        response_examples = []
+        
+        state = episode.get('state', {})
+        dialogue = episode.get('dialogue', [])
+        metadata = episode.get('meta', {})
+        
+        for turn_idx, turn in enumerate(dialogue):
+            # Skip turns without response data
+            if 'response' not in turn and 'label' not in turn:
+                continue
+            
+            # Build strategy SFT example if strategy data exists
+            if 'strategy_generation' in turn:
+                strategy_example = self._build_strategy_sft_example(
+                    state, dialogue, turn, turn_idx, metadata, history_window
+                )
+                strategy_examples.append(strategy_example)
+            
+            # Build response SFT example if response data exists
+            if 'response_generation' in turn:
+                response_example = self._build_response_sft_example(
+                    state, dialogue, turn, turn_idx, metadata, history_window
+                )
+                response_examples.append(response_example)
+        
+        return {
+            'strategy': strategy_examples,
+            'response': response_examples
+        }
+    
+    def _build_strategy_sft_example(self,
+                                   state: Dict,
+                                   dialogue: List[Dict],
+                                   turn: Dict,
+                                   turn_idx: int,
+                                   metadata: Dict,
+                                   history_window: int) -> Dict[str, Any]:
+        """Build SFT example for strategy generation."""
+        history = self.extract_dialogue_history(dialogue, turn_idx, history_window)
+        partner_msg = turn.get('text', '')
+        strategy_data = turn.get('strategy_generation', {})
+        
+        return {
+            "input": {
+                "task": "strategy_generation",
+                "state": state,
+                "recent_convo": history,
+                "partner_msg": partner_msg,
+                "current_side": turn.get('side', metadata.get('side', 'buyer')),
+                "turn_number": turn_idx
+            },
+            "output": strategy_data.get('strategy', '{}'),
+            "meta": {
+                "episode_id": metadata.get('episode_id'),
+                "dialogue_id": metadata.get('dialogue_id'),
+                "turn": turn_idx,
+                "side": turn.get('side', metadata.get('side')),
+                "prompt_tokens": strategy_data.get('prompt_tokens', 0),
+                "output_tokens": strategy_data.get('output_tokens', 0),
+                "generation_time_ms": strategy_data.get('generation_time_ms', 0)
+            }
+        }
+    
+    def _build_response_sft_example(self,
+                                   state: Dict,
+                                   dialogue: List[Dict],
+                                   turn: Dict,
+                                   turn_idx: int,
+                                   metadata: Dict,
+                                   history_window: int) -> Dict[str, Any]:
+        """Build SFT example for response generation."""
+        history = self.extract_dialogue_history(dialogue, turn_idx, history_window)
+        partner_msg = turn.get('text', '')
+        strategy_data = turn.get('strategy_generation', {})
+        response_data = turn.get('response_generation', {})
+        
+        return {
+            "input": {
+                "task": "response_generation",
+                "state": state,
+                "recent_convo": history,
+                "partner_msg": partner_msg,
+                "strategy": strategy_data.get('strategy', '{}'),
+                "current_side": turn.get('side', metadata.get('side', 'buyer')),
+                "turn_number": turn_idx
+            },
+            "output": response_data.get('response', turn.get('response', '')),
+            "meta": {
+                "episode_id": metadata.get('episode_id'),
+                "dialogue_id": metadata.get('dialogue_id'),
+                "turn": turn_idx,
+                "side": turn.get('side', metadata.get('side')),
+                "action": turn.get('action', 'PROPOSE'),
+                "prompt_tokens": response_data.get('prompt_tokens', 0),
+                "output_tokens": response_data.get('output_tokens', 0),
+                "generation_time_ms": response_data.get('generation_time_ms', 0)
+            }
+        }
+    
+    def batch_convert_separated(self,
+                               episodes_file: str,
+                               strategy_output: Optional[str] = None,
+                               response_output: Optional[str] = None,
+                               history_window: int = 5) -> Dict[str, str]:
+        """
+        Convert batch of episodes to separated SFT format.
+        
+        Args:
+            episodes_file: Path to JSONL file with episodes
+            strategy_output: Optional output path for strategy SFT data
+            response_output: Optional output path for response SFT data
+            history_window: Number of recent turns for context
+        
+        Returns:
+            Dictionary with paths to strategy and response output files
+        """
+        episodes = self.load_jsonl(Path(episodes_file))
+        
+        all_strategy = []
+        all_response = []
+        
+        for episode in episodes:
+            separated = self.episode_to_sft_separated(episode, history_window)
+            all_strategy.extend(separated['strategy'])
+            all_response.extend(separated['response'])
+        
+        # Determine output paths
+        if strategy_output is None:
+            strategy_path = self.output_dir / f"sft_strategy_{len(all_strategy)}.jsonl"
+        else:
+            strategy_path = Path(strategy_output)
+        
+        if response_output is None:
+            response_path = self.output_dir / f"sft_response_{len(all_response)}.jsonl"
+        else:
+            response_path = Path(response_output)
+        
+        # Save separated datasets
+        self.save_jsonl(all_strategy, strategy_path)
+        self.save_jsonl(all_response, response_path)
+        
+        logger.info(f"Converted {len(episodes)} episodes:")
+        logger.info(f"  - {len(all_strategy)} strategy examples -> {strategy_path}")
+        logger.info(f"  - {len(all_response)} response examples -> {response_path}")
+        
+        return {
+            'strategy': str(strategy_path),
+            'response': str(response_path)
+        }

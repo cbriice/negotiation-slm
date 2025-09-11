@@ -309,6 +309,8 @@ class SelfChatWorld(World):
             # Extract text and check if episode is done
             text = response.get('text', '')
             episode_done = response.get('episode_done', False)
+            strategy = response.get('strategy', None)
+            token_metrics = response.get('token_metrics', None)
             
             # Parse action
             action = None
@@ -317,15 +319,38 @@ class SelfChatWorld(World):
                     action = act.value
                     break
             
-            # Log turn
-            episode['dialogue'].append({
+            # Build turn log entry
+            turn_entry = {
                 'turn': turn,
                 'speaker': speaker,
                 'text': text,
                 'action': action,
-                'tokens': len(text.split()),
+                'tokens': len(text.split()),  # Keep for backwards compat
                 'timestamp': datetime.now().isoformat()
-            })
+            }
+            
+            # Add two-part response data if available
+            if strategy and token_metrics:
+                # Strategy generation phase
+                turn_entry['strategy_generation'] = {
+                    'prompt': current_agent._build_strategy_prompt() if hasattr(current_agent, '_build_strategy_prompt') else '',
+                    'output': strategy,
+                    'prompt_tokens': token_metrics['strategy']['prompt_tokens'],
+                    'output_tokens': token_metrics['strategy']['output_tokens'],
+                    'duration_ms': token_metrics['strategy']['generation_time_ms']
+                }
+                
+                # Response generation phase
+                turn_entry['response_generation'] = {
+                    'prompt': current_agent._build_response_prompt(strategy) if hasattr(current_agent, '_build_response_prompt') else '',
+                    'output': text,
+                    'prompt_tokens': token_metrics['response']['prompt_tokens'],
+                    'output_tokens': token_metrics['response']['output_tokens'],
+                    'duration_ms': token_metrics['response']['generation_time_ms']
+                }
+            
+            # Log turn
+            episode['dialogue'].append(turn_entry)
             
             # Other agent observes
             if not episode_done:
@@ -373,6 +398,18 @@ class SelfChatWorld(World):
         for agent in self.agents:
             all_violations.extend(agent.metrics.get('protocol_violations', []))
         
+        # Calculate token metrics for two-part system
+        strategy_tokens = 0
+        response_tokens = 0
+        total_tokens = buyer.metrics['tokens_sent'] + seller.metrics['tokens_sent']
+        
+        # If using two-part response, calculate separate metrics
+        for turn_data in episode['dialogue']:
+            if 'strategy_generation' in turn_data:
+                strategy_tokens += turn_data['strategy_generation']['output_tokens']
+            if 'response_generation' in turn_data:
+                response_tokens += turn_data['response_generation']['output_tokens']
+        
         # Fill episode metrics
         episode['metrics'] = {
             'turns': turn,
@@ -381,10 +418,13 @@ class SelfChatWorld(World):
             'terms_met_percentage': terms_met_percentage,
             'buyer_tokens': buyer.metrics['tokens_sent'],
             'seller_tokens': seller.metrics['tokens_sent'],
-            'total_tokens': buyer.metrics['tokens_sent'] + seller.metrics['tokens_sent'],
+            'total_tokens': total_tokens,
+            # New breakdown for two-part system
+            'strategy_tokens': strategy_tokens,
+            'response_tokens': response_tokens,
             'protocol_violations': all_violations,
             'duration_seconds': episode_duration,
-            'tokens_per_second': (buyer.metrics['tokens_sent'] + seller.metrics['tokens_sent']) / episode_duration if episode_duration > 0 else 0
+            'tokens_per_second': total_tokens / episode_duration if episode_duration > 0 else 0
         }
         
         return episode

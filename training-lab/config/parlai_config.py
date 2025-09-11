@@ -1,6 +1,12 @@
 from pathlib import Path
 from typing import Dict, Any, Optional
-from training_parameters import MODEL_TEMP
+from training_parameters import (
+    MODEL_TEMP, 
+    USE_TWO_PART_RESPONSE,
+    STRATEGY_TEMPERATURE,
+    STRATEGY_MAX_TOKENS,
+    RESPONSE_MAX_TOKENS
+)
 
 BASE_DIR = Path(__file__).parent.parent
 
@@ -15,6 +21,11 @@ PARLAI_CONFIG = {
     'temperature': MODEL_TEMP,
     'top_p': 0.9,
     'max_new_tokens': 256,
+    # Two-part response configuration
+    'use_two_part_response': USE_TWO_PART_RESPONSE,
+    'strategy_temperature': STRATEGY_TEMPERATURE,
+    'strategy_max_tokens': STRATEGY_MAX_TOKENS,
+    'response_max_tokens': RESPONSE_MAX_TOKENS,
 }
 
 SELFCHAT_CONFIG = {

@@ -61,6 +61,24 @@ class SessionMetrics:
             metrics['conversations_per_second'] = 0
             metrics['agent_tokens_per_second'] = 0
         
+        # Two-part response phase-specific throughput
+        total_strategy_tokens = sum(ep.get('strategy_tokens', 0) for ep in episodes)
+        total_response_tokens = sum(ep.get('response_tokens', 0) for ep in episodes)
+        
+        if metrics['duration_seconds'] > 0:
+            metrics['strategy_tokens_per_second'] = total_strategy_tokens / metrics['duration_seconds']
+            metrics['response_tokens_per_second'] = total_response_tokens / metrics['duration_seconds']
+        else:
+            metrics['strategy_tokens_per_second'] = 0
+            metrics['response_tokens_per_second'] = 0
+        
+        # Phase-specific averages
+        metrics['avg_strategy_tokens'] = total_strategy_tokens / len(episodes) if episodes else 0
+        metrics['avg_response_tokens'] = total_response_tokens / len(episodes) if episodes else 0
+        metrics['strategy_to_response_ratio'] = (
+            total_strategy_tokens / total_response_tokens if total_response_tokens > 0 else 0
+        )
+        
         # Terms matching performance
         terms_matches = [ep.get('terms_match_pct', 0) for ep in episodes if ep.get('deal_closed')]
         if terms_matches:

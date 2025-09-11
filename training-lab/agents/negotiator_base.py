@@ -83,6 +83,40 @@ class NegotiatorBase(Agent):
                 continue
         return None
     
+    def validate_strategy(self, strategy: Dict[str, Any]) -> Tuple[bool, List[str]]:
+        """Validate strategy JSON structure."""
+        errors = []
+        
+        # Check required fields
+        required_fields = ['action_indicator', 'target_price', 'tone', 'tactics', 'reasoning']
+        for field in required_fields:
+            if field not in strategy:
+                errors.append(f"Missing required field: {field}")
+        
+        # Validate action_indicator
+        if 'action_indicator' in strategy:
+            valid_actions = ['PROPOSE', 'COMMIT', 'ACK', 'NACK', 'NO_DEAL']
+            if strategy['action_indicator'] not in valid_actions:
+                errors.append(f"Invalid action_indicator: {strategy['action_indicator']}")
+        
+        # Validate tone
+        if 'tone' in strategy:
+            valid_tones = ['aggressive', 'reasonable', 'sympathetic', 'firm']
+            if strategy['tone'] not in valid_tones:
+                errors.append(f"Invalid tone: {strategy['tone']}")
+        
+        # Validate target_price
+        if 'target_price' in strategy:
+            if not isinstance(strategy['target_price'], (int, float)) or strategy['target_price'] < 0:
+                errors.append("target_price must be a non-negative number")
+        
+        # Validate tactics is a list
+        if 'tactics' in strategy:
+            if not isinstance(strategy['tactics'], list):
+                errors.append("tactics must be a list")
+        
+        return len(errors) == 0, errors
+    
     def validate_terms_json(self, terms: Dict[str, Any]) -> Tuple[bool, List[str]]:
         """
         Validate terms against TermsJSON schema.

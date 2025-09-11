@@ -54,6 +54,17 @@ class EpisodeMetrics:
         metrics['total_tokens'] = self._count_total_tokens(dialogue)
         metrics['agent_tokens'] = self._count_agent_tokens(dialogue, meta.get('side'))
         
+        # Two-part response token counts (strategy and response phases)
+        strategy_tokens = self._count_strategy_tokens(dialogue)
+        metrics['strategy_tokens'] = strategy_tokens['total']
+        metrics['strategy_prompt_tokens'] = strategy_tokens['prompt']
+        metrics['strategy_output_tokens'] = strategy_tokens['output']
+        
+        response_tokens = self._count_response_tokens(dialogue)
+        metrics['response_tokens'] = response_tokens['total']
+        metrics['response_prompt_tokens'] = response_tokens['prompt']
+        metrics['response_output_tokens'] = response_tokens['output']
+        
         # Deal outcome analysis
         deal_analysis = self._analyze_deal_outcome(dialogue)
         metrics['deal_closed'] = deal_analysis['closed']
@@ -101,6 +112,38 @@ class EpisodeMetrics:
                 text = turn.get('response', turn.get('text', ''))
                 total += len(text.split())
         return total
+    
+    def _count_strategy_tokens(self, dialogue: List[Dict]) -> Dict[str, int]:
+        """Count tokens from strategy generation phase."""
+        result = {'total': 0, 'prompt': 0, 'output': 0}
+        
+        for turn in dialogue:
+            if 'strategy_generation' in turn:
+                strategy_data = turn['strategy_generation']
+                prompt_tokens = strategy_data.get('prompt_tokens', 0)
+                output_tokens = strategy_data.get('output_tokens', 0)
+                
+                result['prompt'] += prompt_tokens
+                result['output'] += output_tokens
+                result['total'] += prompt_tokens + output_tokens
+        
+        return result
+    
+    def _count_response_tokens(self, dialogue: List[Dict]) -> Dict[str, int]:
+        """Count tokens from response generation phase."""
+        result = {'total': 0, 'prompt': 0, 'output': 0}
+        
+        for turn in dialogue:
+            if 'response_generation' in turn:
+                response_data = turn['response_generation']
+                prompt_tokens = response_data.get('prompt_tokens', 0)
+                output_tokens = response_data.get('output_tokens', 0)
+                
+                result['prompt'] += prompt_tokens
+                result['output'] += output_tokens
+                result['total'] += prompt_tokens + output_tokens
+        
+        return result
     
     def _analyze_deal_outcome(self, dialogue: List[Dict]) -> Dict[str, Any]:
         """Analyze whether a deal was closed and extract final terms."""
