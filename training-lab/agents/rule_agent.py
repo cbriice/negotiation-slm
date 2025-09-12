@@ -417,6 +417,9 @@ class RuleAgent(NegotiatorBase):
     
     def act(self):
         """Generate a response based on persona, tactics, and rules."""
+        # Import protocol validator
+        from utils.protocol_validator import check_for_leaked_tags
+        
         # Handle response delay if configured
         if self.response_delay > 0:
             time.sleep(self.response_delay)
@@ -432,6 +435,18 @@ class RuleAgent(NegotiatorBase):
         
         # Generate response text
         response_text = self._generate_response_text(action, price)
+        
+        # CRITICAL: Verify no tags leaked into message text
+        has_leaked, found_tags = check_for_leaked_tags(response_text)
+        if has_leaked:
+            # Log critical error and clean the text
+            import logging
+            logging.error(f"CRITICAL: Action tags leaked into message: {found_tags}")
+            # Remove the leaked tags
+            for tag in found_tags:
+                response_text = response_text.replace(tag, '').strip()
+            # Track this violation
+            self.metrics['protocol_violations'].append('tag_in_message')
         
         # Update state
         self.update_negotiation_state(action, is_self=True)

@@ -202,6 +202,8 @@ class NegotiatorBase(Agent):
     def check_protocol_violations(self, action: Optional[NegotiationAction], 
                                  message: str) -> List[str]:
         """Check for protocol violations in the current turn."""
+        from utils.protocol_validator import check_terms_equivalence
+        
         violations = []
         
         # Check for missing action tag
@@ -228,8 +230,10 @@ class NegotiatorBase(Agent):
             terms = self.extract_terms_json(message)
             if terms is None:
                 violations.append("ack_missing_terms")
-            elif self.terms_buffer and terms != self.terms_buffer:
-                violations.append("ack_terms_mismatch")
+            elif self.terms_buffer:
+                # Use canonicalized comparison for ACK equivalence
+                if not check_terms_equivalence(terms, self.terms_buffer):
+                    violations.append("ack_terms_mismatch")
         
         return violations
     
@@ -265,6 +269,8 @@ class NegotiatorBase(Agent):
     
     def observe(self, observation):
         """Process incoming message and update state."""
+        from utils.protocol_validator import validate_action_sequence
+        
         # Update observation in memory
         self.observation = observation
         
@@ -289,6 +295,16 @@ class NegotiatorBase(Agent):
                     'side': 'partner',
                     'action': action.value
                 })
+                
+                # Validate action sequence after updating history
+                sequence_valid, sequence_violations = validate_action_sequence(
+                    self.metrics['action_history'], 
+                    max_lookback=10
+                )
+                if not sequence_valid:
+                    # Add sequence violations to protocol violations
+                    for seq_violation in sequence_violations:
+                        self.metrics['protocol_violations'].append(f"sequence_error: {seq_violation}")
             
             # Store terms if present
             if action in [NegotiationAction.COMMIT, NegotiationAction.ACK]:

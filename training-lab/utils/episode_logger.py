@@ -243,13 +243,36 @@ class EpisodeLogger:
             format: Output format ('raw', 'sft', or 'dpo')
             stage: Training stage (overrides instance stage)
         """
+        from utils.protocol_validator import (
+            validate_episode_for_training, 
+            calculate_protocol_score
+        )
+        
+        # Validate episode for training suitability
+        is_suitable, reasons = validate_episode_for_training(episode)
+        
+        # Calculate protocol score
+        violations = episode.get('metrics', {}).get('protocol_violations', [])
+        action_history = episode.get('metrics', {}).get('action_history', [])
+        deal_closed = episode.get('metrics', {}).get('deal_closed', False)
+        protocol_score = calculate_protocol_score(violations, action_history, deal_closed)
+        
+        # Add validation metadata
+        episode['meta'] = episode.get('meta', {})
+        episode['meta']['suitable_for_training'] = is_suitable
+        episode['meta']['validation_issues'] = reasons if not is_suitable else []
+        episode['meta']['protocol_score'] = protocol_score
+        
         # Add to buffer based on format
         if format == 'sft':
-            packets = self.transform_to_sft_packet(episode)
-            self.buffer.extend(packets)
+            # Only transform to SFT if suitable for training
+            if is_suitable:
+                packets = self.transform_to_sft_packet(episode)
+                self.buffer.extend(packets)
+            else:
+                logger.warning(f"Episode not suitable for SFT training: {reasons}")
         else:
             # Raw format - add metadata
-            episode['meta'] = episode.get('meta', {})
             episode['meta']['logged_at'] = datetime.now().isoformat()
             current_stage = stage or self.stage
             episode['meta']['stage'] = current_stage.value if current_stage is not None else 'unknown'
@@ -288,6 +311,24 @@ class EpisodeLogger:
             turn_idx: Specific turn to create pair for
             stage: Training stage
         """
+        from utils.protocol_validator import validate_episode_for_training
+        
+        # Validate both episodes are suitable for training
+        chosen_suitable, chosen_reasons = validate_episode_for_training(chosen_episode)
+        rejected_suitable, rejected_reasons = validate_episode_for_training(rejected_episode)
+        
+        if not chosen_suitable:
+            logger.warning(f"Chosen episode not suitable for DPO: {chosen_reasons}")
+            return
+        
+        # Rejected episode can have issues (that's why it's rejected)
+        # but shouldn't have critical issues like tag leaks
+        if rejected_reasons:
+            critical_issues = [r for r in rejected_reasons if 'leaked action tags' in r]
+            if critical_issues:
+                logger.warning(f"Rejected episode has critical issues: {critical_issues}")
+                return
+        
         dpo_pair = self.transform_to_dpo_pair(chosen_episode, rejected_episode, turn_idx)
         if dpo_pair:
             self.buffer.append(dpo_pair)
@@ -360,6 +401,32 @@ class EpisodeLogger:
                     except json.JSONDecodeError as e:
                         logger.warning(f"Failed to parse line {line_num} in {filepath}: {e}")
                         continue
+    
+    def select_and_log_dpo_pairs(self, episodes: List[Dict[str, Any]], 
+                                 min_score_gap: float = 0.3,
+                                 stage: Optional[TrainingStage] = None) -> int:
+        """
+        Automatically select and log DPO pairs from episodes based on protocol scores.
+        
+        Args:
+            episodes: List of episodes to select pairs from
+            min_score_gap: Minimum score difference for pair selection
+            stage: Training stage
+            
+        Returns:
+            Number of DPO pairs created
+        """
+        from utils.protocol_validator import select_dpo_pairs
+        
+        # Select DPO pairs based on protocol compliance
+        pairs = select_dpo_pairs(episodes, min_score_gap=min_score_gap)
+        
+        # Log each pair
+        for chosen, rejected in pairs:
+            self.log_dpo_pair(chosen, rejected, stage=stage)
+        
+        logger.info(f"Created {len(pairs)} DPO pairs from {len(episodes)} episodes")
+        return len(pairs)
     
     def get_statistics(self) -> Dict[str, Any]:
         """
