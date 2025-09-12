@@ -343,14 +343,15 @@ class OllamaNegotiator(NegotiatorBase):
             prompt_tokens, output_tokens, duration_ms
         )
         
-        # Extract action indicator from strategy
+        # Extract action indicator from strategy for backend use only
+        # CRITICAL: Do NOT add tags to the actual response text!
+        # Tags are backend-only metadata, never part of agent messages
         action_indicator = 'PROPOSE'  # default
         if strategy and isinstance(strategy, dict):
             action_indicator = strategy.get('action_indicator', 'PROPOSE')
         
-        # Ensure response has the correct action tag
-        if f"[{action_indicator}]" not in response_text:
-            response_text = f"[{action_indicator}] {response_text}"
+        # REMOVED: Tag injection into response text
+        # Tags should NEVER appear in agent messages - they're backend only!
         
         return response_text
     
@@ -429,7 +430,10 @@ class OllamaNegotiator(NegotiatorBase):
             'episode_done': self.negotiation_state.value in ['concluded', 'failed'],
             # Include strategy info for logging
             'strategy': self.current_strategy if self.use_two_part_response else None,
-            'token_metrics': self.token_metrics.get_phase_breakdown() if self.use_two_part_response else None
+            'token_metrics': self.token_metrics.get_phase_breakdown() if self.use_two_part_response else None,
+            # CRITICAL: Store action tag as backend metadata, NOT in text!
+            'backend_tag': action_str if 'action_str' in locals() else 'PROPOSE',
+            'action_tag': action_str if 'action_str' in locals() else 'PROPOSE'
         }
     
     def batch_act(self, observations):

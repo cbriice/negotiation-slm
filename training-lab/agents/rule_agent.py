@@ -308,11 +308,15 @@ class RuleAgent(NegotiatorBase):
                     return list_price * 0.9
     
     def _generate_response_text(self, action: NegotiationAction, price: Optional[float]) -> str:
-        """Generate response text based on persona and tactics."""
+        """Generate response text based on persona and tactics.
+        
+        CRITICAL: Do NOT include action tags in the response text!
+        Tags are backend-only metadata, never part of agent messages.
+        """
         parts = []
         
-        # Add action tag
-        parts.append(action.value)
+        # REMOVED: Tag injection into response text
+        # Tags should NEVER appear in agent messages - they're backend only!
         
         # Handle different actions
         if action == NegotiationAction.NO_DEAL:
@@ -456,7 +460,10 @@ class RuleAgent(NegotiatorBase):
         return {
             'id': self.id,
             'text': response_text,
-            'episode_done': self.negotiation_state.value in ['concluded', 'failed'] or self.terminated
+            'episode_done': self.negotiation_state.value in ['concluded', 'failed'] or self.terminated,
+            # CRITICAL: Store action tag as backend metadata, NOT in text!
+            'backend_tag': action.name,  # e.g., 'PROPOSE', 'COMMIT', etc.
+            'action_tag': action.name
         }
     
     def get_agent_summary(self) -> Dict[str, Any]:

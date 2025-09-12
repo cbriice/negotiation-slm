@@ -14,6 +14,8 @@ from parlai.core.teachers import FixedDialogTeacher
 from parlai.core.message import Message
 from parlai.core.opt import Opt
 
+from utils.episode_logger import EpisodeLogger, TrainingStage
+
 # Set up logging
 logger = logging.getLogger(__name__)
 
@@ -89,11 +91,20 @@ class NegotiationJSONTeacher(FixedDialogTeacher):
         self.episodes: List[Dict[str, Any]] = []
         self.episode_metrics: Dict[str, Any] = {}
         
+        # Initialize episode logger
+        stage = self._determine_training_stage(opt)
+        self.episode_logger = EpisodeLogger(
+            base_dir=str(self.data_dir),
+            batch_size=opt.get('episode_batch_size', 100),
+            stage=stage
+        )
+        
         # Load data if not in shared mode
         if shared:
             # Copy shared data
             self.episodes = shared['episodes']
             self.episode_metrics = shared['episode_metrics']
+            self.episode_logger = shared.get('episode_logger', self.episode_logger)
         else:
             # Load episodes from JSONL
             self._load_episodes()
@@ -106,7 +117,27 @@ class NegotiationJSONTeacher(FixedDialogTeacher):
         shared = super().share()
         shared['episodes'] = self.episodes
         shared['episode_metrics'] = self.episode_metrics
+        shared['episode_logger'] = self.episode_logger
         return shared
+    
+    def _determine_training_stage(self, opt: Dict[str, Any]) -> Optional[TrainingStage]:
+        """Determine the current training stage from options."""
+        stage_name = opt.get('training_stage', '').lower()
+        
+        if 'selfchat' in stage_name:
+            return TrainingStage.SELFCHAT
+        elif 'dialogpartner' in stage_name or 'dialog' in stage_name:
+            return TrainingStage.DIALOGPARTNER
+        elif 'human' in stage_name:
+            return TrainingStage.HUMAN_EVAL
+        elif 'baseline' in stage_name:
+            return TrainingStage.BASELINE
+        elif 'dpo' in stage_name:
+            return TrainingStage.DPO_PAIRS
+        elif 'augment' in stage_name:
+            return TrainingStage.AUGMENTED
+        else:
+            return None
     
     def _load_episodes(self):
         """Load negotiation episodes from JSONL file."""
@@ -290,22 +321,66 @@ class NegotiationJSONTeacher(FixedDialogTeacher):
             'avg_violations': protocol_violations / num_episodes if num_episodes > 0 else 0,
         }
     
-    def save_episodes(self, filepath: Optional[Path] = None):
-        """Save current episodes to JSONL file."""
-        if filepath is None:
-            filepath = self.data_dir / f"processed_{self.data_file}"
+    def save_episodes(self, filepath: Optional[Path] = None, 
+                      format: str = 'raw',
+                      stage: Optional[TrainingStage] = None):
+        """
+        Save current episodes using the episode logger.
         
-        # Ensure directory exists
-        filepath.parent.mkdir(parents=True, exist_ok=True)
+        Args:
+            filepath: Optional specific filepath (uses logger defaults if None)
+            format: Output format ('raw', 'sft', or 'dpo')
+            stage: Training stage for directory organization
+        """
+        # Add metrics to episodes before saving
+        for episode in self.episodes:
+            episode_id = episode.get('meta', {}).get('episode_id')
+            if episode_id and episode_id in self.episode_metrics:
+                episode['metrics'] = self.episode_metrics[episode_id]
         
-        # Save episodes
-        with open(filepath, 'w') as f:
-            for episode in self.episodes:
-                # Add metrics if available
-                episode_id = episode.get('meta', {}).get('episode_id')
-                if episode_id and episode_id in self.episode_metrics:
-                    episode['metrics'] = self.episode_metrics[episode_id]
-                
-                f.write(json.dumps(episode) + '\n')
+        # Use episode logger for saving
+        if filepath:
+            # Legacy mode - save directly to specified file
+            filepath = Path(filepath)
+            filepath.parent.mkdir(parents=True, exist_ok=True)
+            
+            with open(filepath, 'w') as f:
+                for episode in self.episodes:
+                    f.write(json.dumps(episode) + '\n')
+            
+            logger.info(f"Saved {len(self.episodes)} episodes to {filepath}")
+        else:
+            # Use episode logger with format transformation
+            self.episode_logger.log_episodes_batch(
+                self.episodes, 
+                format=format,
+                stage=stage
+            )
+            self.episode_logger.flush(stage=stage)
+            
+            stats = self.episode_logger.get_statistics()
+            logger.info(f"Logged {stats['episodes_logged']} episodes, "
+                       f"created {stats['sft_packets_created']} SFT packets, "
+                       f"wrote {stats['batches_written']} batches")
+    
+    def save_dpo_pairs(self, chosen_episodes: List[Dict[str, Any]],
+                      rejected_episodes: List[Dict[str, Any]],
+                      stage: Optional[TrainingStage] = None):
+        """
+        Save DPO training pairs using the episode logger.
         
-        logger.info(f"Saved {len(self.episodes)} episodes to {filepath}")
+        Args:
+            chosen_episodes: Episodes with preferred responses
+            rejected_episodes: Episodes with rejected responses
+            stage: Training stage (defaults to DPO_PAIRS)
+        """
+        stage = stage or TrainingStage.DPO_PAIRS
+        
+        # Create DPO pairs
+        for chosen, rejected in zip(chosen_episodes, rejected_episodes):
+            self.episode_logger.log_dpo_pair(chosen, rejected, stage=stage)
+        
+        self.episode_logger.flush(stage=stage)
+        
+        stats = self.episode_logger.get_statistics()
+        logger.info(f"Created and saved {stats['dpo_pairs_created']} DPO pairs")

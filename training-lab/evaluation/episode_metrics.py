@@ -154,32 +154,39 @@ class EpisodeMetrics:
         }
         
         # Check for successful deal pattern: COMMIT -> ACK
+        # Tags are in backend metadata, NOT in the actual messages!
         commit_found = False
         commit_terms = None
         
         for i, turn in enumerate(dialogue):
+            # Get the backend action tag - NOT from the message text!
+            action_tag = turn.get('action_tag', turn.get('backend_tag', ''))
             text = turn.get('text', '') + ' ' + turn.get('response', '')
             
-            # Look for COMMIT action
-            if '[COMMIT]' in text:
+            # Look for COMMIT action in backend metadata
+            if action_tag == 'COMMIT':
                 commit_found = True
-                # Try to extract terms JSON
+                # Try to extract terms JSON - find first { and last }
                 try:
-                    json_match = re.search(r'\{[^}]+\}', text)
-                    if json_match:
-                        commit_terms = json.loads(json_match.group())
-                        result['final_price'] = commit_terms.get('price', 0.0)
+                    first_brace = text.find('{')
+                    last_brace = text.rfind('}')
+                    if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
+                        json_str = text[first_brace:last_brace + 1]
+                        commit_terms = json.loads(json_str)
+                        result['final_price'] = commit_terms.get('price', commit_terms.get('total_price', 0.0))
                 except (json.JSONDecodeError, AttributeError):
                     pass
             
-            # Look for ACK after COMMIT
-            elif commit_found and '[ACK]' in text:
+            # Look for ACK after COMMIT in backend metadata
+            elif commit_found and action_tag == 'ACK':
                 result['closed'] = True
                 # Try to match ACK terms with COMMIT terms
                 try:
-                    json_match = re.search(r'\{[^}]+\}', text)
-                    if json_match and commit_terms:
-                        ack_terms = json.loads(json_match.group())
+                    first_brace = text.find('{')
+                    last_brace = text.rfind('}')
+                    if first_brace != -1 and last_brace != -1 and last_brace > first_brace and commit_terms:
+                        json_str = text[first_brace:last_brace + 1]
+                        ack_terms = json.loads(json_str)
                         # Calculate terms match percentage
                         matching_keys = sum(1 for k in commit_terms 
                                           if k in ack_terms and commit_terms[k] == ack_terms[k])
@@ -189,8 +196,8 @@ class EpisodeMetrics:
                     pass
                 break
             
-            # NO_DEAL ends negotiation without agreement
-            elif '[NO_DEAL]' in text:
+            # NO_DEAL ends negotiation without agreement (backend metadata)
+            elif action_tag == 'NO_DEAL':
                 result['closed'] = False
                 break
         
@@ -238,37 +245,40 @@ class EpisodeMetrics:
         commit_made = False
         
         for i, turn in enumerate(dialogue):
+            # Tags are in backend metadata, NOT in messages!
+            action_tag = turn.get('action_tag', turn.get('backend_tag', ''))
             text = turn.get('text', '') + ' ' + turn.get('response', '')
             
-            # Check for multiple action tags in one turn
-            action_count = sum(1 for action in ['[PROPOSE]', '[COMMIT]', '[ACK]', '[NACK]', '[NO_DEAL]'] 
-                             if action in text)
-            if action_count > 1:
-                violations.append(f"Turn {i}: Multiple action tags in single turn")
+            # CRITICAL: Tags should NEVER appear in the actual text!
+            # If we find tags in the message text, that's a violation!
+            tags_in_text = ['[PROPOSE]', '[COMMIT]', '[ACK]', '[NACK]', '[NO_DEAL]']
+            for tag in tags_in_text:
+                if tag in text:
+                    violations.append(f"Turn {i}: CRITICAL - Tag '{tag}' found in message text! Tags must be backend-only!")
             
-            # State machine validation
-            if '[PROPOSE]' in text:
+            # State machine validation using backend tags
+            if action_tag == 'PROPOSE':
                 if state == 'COMMITTED':
                     violations.append(f"Turn {i}: PROPOSE after COMMIT")
                 state = 'NEGOTIATING'
                 
-            elif '[COMMIT]' in text:
+            elif action_tag == 'COMMIT':
                 if commit_made:
                     violations.append(f"Turn {i}: Multiple COMMIT attempts")
                 commit_made = True
                 state = 'COMMITTED'
-                # Check for TERMS_JSON
+                # Check for TERMS_JSON in the message (this should be in the text)
                 if '{' not in text or '}' not in text:
                     violations.append(f"Turn {i}: COMMIT without TERMS_JSON")
                     
-            elif '[ACK]' in text:
+            elif action_tag == 'ACK':
                 if state != 'COMMITTED':
                     violations.append(f"Turn {i}: ACK without prior COMMIT")
                 # Check for echoed TERMS_JSON
                 if '{' not in text or '}' not in text:
                     violations.append(f"Turn {i}: ACK without echoing TERMS_JSON")
                     
-            elif '[NACK]' in text:
+            elif action_tag == 'NACK':
                 if state != 'COMMITTED':
                     violations.append(f"Turn {i}: NACK without prior COMMIT")
                 # Check for explanation
@@ -276,12 +286,12 @@ class EpisodeMetrics:
                     violations.append(f"Turn {i}: NACK without explanation")
                 state = 'NEGOTIATING'
                 
-            elif '[NO_DEAL]' in text:
+            elif action_tag == 'NO_DEAL':
                 if i < 2:  # Too early to walk away
                     violations.append(f"Turn {i}: Premature NO_DEAL")
         
-        # Check for incomplete negotiation
-        if len(dialogue) > 0 and state == 'COMMITTED' and not any('[ACK]' in (t.get('text', '') + t.get('response', '')) for t in dialogue):
+        # Check for incomplete negotiation using backend tags
+        if len(dialogue) > 0 and state == 'COMMITTED' and not any(t.get('action_tag', t.get('backend_tag', '')) == 'ACK' for t in dialogue):
             violations.append("Incomplete: COMMIT without ACK")
         
         return violations
@@ -305,8 +315,9 @@ class EpisodeMetrics:
             text = turn.get('text', '') + ' ' + turn.get('response', '')
             side = turn.get('side')
             
-            # Count proposals
-            if '[PROPOSE]' in text:
+            # Count proposals using backend tags
+            action_tag = turn.get('action_tag', turn.get('backend_tag', ''))
+            if action_tag == 'PROPOSE':
                 dynamics['num_proposals'] += 1
                 # Extract price if possible
                 price_match = re.search(r'\$?(\d+(?:\.\d{2})?)', text)

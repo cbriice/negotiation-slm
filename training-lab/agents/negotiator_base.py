@@ -69,18 +69,19 @@ class NegotiatorBase(Agent):
     
     def extract_terms_json(self, text: str) -> Optional[Dict[str, Any]]:
         """Extract and validate TERMS_JSON from message."""
-        # Look for JSON block in the message
-        json_pattern = r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}'
-        matches = re.findall(json_pattern, text)
+        # Look for JSON block - find first { and last }
+        first_brace = text.find('{')
+        last_brace = text.rfind('}')
         
-        for match in matches:
+        if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
             try:
-                terms = json.loads(match)
+                json_str = text[first_brace:last_brace + 1]
+                terms = json.loads(json_str)
                 # Basic validation - check for required fields
                 if 'dialogue_id' in terms and 'status' in terms:
                     return terms
             except json.JSONDecodeError:
-                continue
+                pass
         return None
     
     def validate_strategy(self, strategy: Dict[str, Any]) -> Tuple[bool, List[str]]:

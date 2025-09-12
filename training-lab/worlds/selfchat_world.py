@@ -313,21 +313,22 @@ class SelfChatWorld(World):
             strategy = response.get('strategy', None)
             token_metrics = response.get('token_metrics', None)
             
-            # Parse action
-            action = None
-            for act in NegotiationAction:
-                if act.value in text:
-                    action = act.value
-                    break
+            # REMOVED: Action parsing from text
+            # Actions are now in backend metadata only, NOT in messages!
+            # Legacy 'action' field kept for backwards compatibility
+            action = response.get('backend_tag', response.get('action_tag', None))
             
             # Build turn log entry
             turn_entry = {
                 'turn': turn,
                 'speaker': speaker,
                 'text': text,
-                'action': action,
+                'action': action,  # Keep for backwards compat
                 'tokens': len(text.split()),  # Keep for backwards compat
-                'timestamp': datetime.now().isoformat()
+                'timestamp': datetime.now().isoformat(),
+                # CRITICAL: Store backend tag from response metadata
+                'backend_tag': response.get('backend_tag', response.get('action_tag', '')),
+                'action_tag': response.get('action_tag', response.get('backend_tag', ''))
             }
             
             # Add two-part response data if available
