@@ -12,6 +12,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 from tasks.negotiation_teacher import NegotiationJSONTeacher
 from schema.rule_agent.personas import PersonaType, PersonaManager
+from parlai.core.opt import Opt
 
 
 class RuleOpponentTeacher(NegotiationJSONTeacher):
@@ -26,11 +27,11 @@ class RuleOpponentTeacher(NegotiationJSONTeacher):
     """
     
     @classmethod
-    def add_cmdline_args(cls, parser, partial_opt=None):
+    def add_cmdline_args(cls, parser, partial_opt: Optional[Opt] = None):
         """Add command-line arguments for rule opponent teacher."""
         # Ensure partial_opt is not None for parent class
         if partial_opt is None:
-            partial_opt = {}
+            partial_opt = Opt()
         super().add_cmdline_args(parser, partial_opt)
         agent = parser.add_argument_group('Rule Opponent Teacher Arguments')
         agent.add_argument(
