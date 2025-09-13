@@ -2,11 +2,11 @@
 Export built-in ParlAI tasks (Deal-or-No-Deal, Casino) to training format.
 """
 
+import json
 import logging
 from typing import Dict, Any, List, Optional, Tuple
 from pathlib import Path
 import re
-from training.converters.base import BaseConverter
 from parlai.core.params import ParlaiParser
 from parlai.core.worlds import create_task
 from parlai.core.agents import create_agent
@@ -15,12 +15,11 @@ from parlai.core.agents import create_agent
 logger = logging.getLogger(__name__)
 
 
-class BuiltinTaskExporter(BaseConverter):
+class BuiltinTaskExporter:
     """Export ParlAI built-in negotiation tasks."""
     
     def __init__(self, output_dir: str = "data/training/builtin_tasks"):
         """Initialize the exporter."""
-        super().__init__(output_dir)
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         
@@ -29,6 +28,25 @@ class BuiltinTaskExporter(BaseConverter):
             'dealnodeal': self._parse_dealnodeal,
             'casino': self._parse_casino
         }
+    
+    def save_jsonl(self, data: List[Dict], filepath: Path) -> None:
+        """Save data to JSONL file."""
+        filepath.parent.mkdir(parents=True, exist_ok=True)
+        with open(filepath, 'w') as f:
+            for item in data:
+                f.write(json.dumps(item) + '\n')
+    
+    def load_jsonl(self, filepath: Path) -> List[Dict]:
+        """Load data from JSONL file."""
+        data = []
+        with open(filepath, 'r') as f:
+            for line in f:
+                if line.strip():
+                    try:
+                        data.append(json.loads(line))
+                    except json.JSONDecodeError as e:
+                        logger.warning(f"Failed to parse line in {filepath}: {e}")
+        return data
     
     def export_task(self,
                    task_name: str,
@@ -323,53 +341,3 @@ class BuiltinTaskExporter(BaseConverter):
                 logger.warning(f"No episodes exported from {task_name}")
         
         return output_files
-    
-    def convert_to_sft(self,
-                      task_name: str,
-                      episodes_file: Optional[str] = None,
-                      output_file: Optional[str] = None) -> str:
-        """
-        Convert task episodes to SFT format.
-        
-        Args:
-            task_name: Name of the task
-            episodes_file: Optional path to episodes file
-            output_file: Optional output path
-        
-        Returns:
-            Path to SFT output file
-        """
-        # Load episodes
-        if episodes_file:
-            episodes = self.load_jsonl(Path(episodes_file))
-        else:
-            # Try default location
-            default_path = self.output_dir / f"{task_name}_episodes.jsonl"
-            if default_path.exists():
-                episodes = self.load_jsonl(default_path)
-            else:
-                logger.warning(f"No episodes file found for {task_name}")
-                return ""
-        
-        # Convert to SFT format
-        from training.converters.sft_converter import SFTConverter
-        sft_converter = SFTConverter(str(self.output_dir / "sft"))
-        
-        all_sft = []
-        for episode in episodes:
-            sft_examples = sft_converter.episode_to_sft(episode)
-            all_sft.extend(sft_examples)
-        
-        # Save
-        if output_file is None:
-            output_path = self.output_dir / "sft" / f"{task_name}_sft.jsonl"
-        else:
-            output_path = Path(output_file)
-        
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        self.save_jsonl(all_sft, output_path)
-        
-        logger.info(f"Converted {len(episodes)} episodes to {len(all_sft)} SFT examples")
-        logger.info(f"Saved to {output_path}")
-        
-        return str(output_path)

@@ -8,10 +8,9 @@ import logging
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
-from training.converters.sft_converter import SFTConverter
-from training.converters.dpo_converter import DPOConverter
 from training.converters.builtin_export import BuiltinTaskExporter
-from training.converters.scoring import EpisodeScorer
+from utils.episode_logger import EpisodeLogger, TrainingStage
+from utils.protocol_validator import calculate_protocol_score, select_dpo_pairs
 
 # Set up logging
 from pathlib import Path
@@ -32,11 +31,11 @@ logger = logging.getLogger(__name__)
 
 
 class DataConverter:
-    """Main orchestrator for data conversion pipeline."""
+    """Main orchestrator for data conversion pipeline using EpisodeLogger."""
     
     def __init__(self, output_dir: str = "data/training"):
         """
-        Initialize the data converter with all sub-converters.
+        Initialize the data converter with EpisodeLogger as the I/O layer.
         
         Args:
             output_dir: Base directory for all converted data
@@ -44,11 +43,11 @@ class DataConverter:
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         
-        # Initialize converters
-        self.sft_converter = SFTConverter(str(self.output_dir / "sft"))
-        self.dpo_converter = DPOConverter(str(self.output_dir / "dpo"))
+        # Initialize episode logger as the single source of truth for data handling
+        self.episode_logger = EpisodeLogger(base_dir=str(self.output_dir), batch_size=1000)
+        
+        # Keep builtin exporter for ParlAI task compatibility
         self.builtin_exporter = BuiltinTaskExporter(str(self.output_dir / "builtin"))
-        self.scorer = EpisodeScorer()
     
     def convert_episodes_to_sft(self,
                                episodes_file: str,
@@ -60,14 +59,25 @@ class DataConverter:
         Args:
             episodes_file: Path to JSONL file with episodes
             output_file: Optional output path
-            history_window: Number of recent turns for context
+            history_window: Number of recent turns for context (currently unused, kept for compatibility)
             
         Returns:
             Path to output file
         """
-        return self.sft_converter.batch_convert(
-            episodes_file, output_file, history_window
-        )
+        # Load episodes
+        episodes = self.episode_logger.load_episodes(episodes_file)
+        
+        # Transform to SFT format
+        sft_packets = self.episode_logger.batch_transform_to_sft(episodes)
+        
+        # Determine output path
+        if output_file is None:
+            output_file = str(self.output_dir / "sft" / "episodes_sft.jsonl")
+        
+        # Write SFT packets
+        self.episode_logger.write_episodes(sft_packets, output_file, format='raw')
+        
+        return output_file
     
     def create_dpo_pairs(self,
                         good_episodes: str,
@@ -86,28 +96,59 @@ class DataConverter:
         Returns:
             Path to output file
         """
-        return self.dpo_converter.batch_create_pairs(
-            good_episodes, bad_episodes, output_file, max_pairs
-        )
+        # Load episodes
+        good_eps = self.episode_logger.load_episodes(good_episodes)
+        bad_eps = self.episode_logger.load_episodes(bad_episodes)
+        
+        # Create DPO pairs
+        dpo_pairs = self.episode_logger.batch_create_dpo_pairs(good_eps, bad_eps, max_pairs)
+        
+        # Determine output path
+        if output_file is None:
+            output_file = str(self.output_dir / "dpo" / "dpo_pairs.jsonl")
+        
+        # Write DPO pairs
+        self.episode_logger.write_episodes(dpo_pairs, output_file, format='dpo')
+        
+        return output_file
     
     def auto_generate_dpo(self,
                          episodes_file: str,
                          output_file: Optional[str] = None,
-                         score_threshold: float = 5.0) -> str:
+                         score_threshold: float = 0.3) -> str:
         """
         Automatically generate DPO pairs by scoring episodes.
         
         Args:
             episodes_file: Path to all episodes
             output_file: Optional output path
-            score_threshold: Minimum score difference for pairing
+            score_threshold: Minimum protocol score difference for pairing (0-1 scale)
             
         Returns:
             Path to output file
         """
-        return self.dpo_converter.auto_generate_pairs(
-            episodes_file, output_file, score_threshold
-        )
+        # Load episodes
+        episodes = self.episode_logger.load_episodes(episodes_file)
+        
+        # Use protocol validator to select DPO pairs
+        pairs = select_dpo_pairs(episodes, min_score_gap=score_threshold)
+        
+        # Convert to DPO packet format
+        dpo_packets = []
+        for chosen, rejected in pairs:
+            pair = self.episode_logger.transform_to_dpo_pair(chosen, rejected)
+            if pair:
+                dpo_packets.append(pair)
+        
+        # Determine output path
+        if output_file is None:
+            output_file = str(self.output_dir / "dpo" / "auto_dpo_pairs.jsonl")
+        
+        # Write DPO pairs
+        self.episode_logger.write_episodes(dpo_packets, output_file, format='dpo')
+        
+        logger.info(f"Generated {len(dpo_packets)} DPO pairs from {len(episodes)} episodes")
+        return output_file
     
     def export_builtin_tasks(self,
                             tasks: Optional[List[str]] = None,
@@ -127,18 +168,25 @@ class DataConverter:
         if tasks is None:
             tasks = ['dealnodeal', 'casino']
         
-        # Export tasks
+        # Export tasks using builtin exporter
         episode_files = self.builtin_exporter.export_all_tasks(
             tasks, max_episodes
         )
         
-        # Convert to SFT if requested
+        # Convert to SFT if requested using EpisodeLogger
         if convert_to_sft:
             sft_files = {}
             for task_name, episode_file in episode_files.items():
-                sft_file = self.builtin_exporter.convert_to_sft(
-                    task_name, episode_file
-                )
+                # Load episodes
+                episodes = self.episode_logger.load_episodes(episode_file)
+                
+                # Transform to SFT
+                sft_packets = self.episode_logger.batch_transform_to_sft(episodes)
+                
+                # Write SFT file
+                sft_file = str(self.output_dir / "builtin" / f"{task_name}_sft.jsonl")
+                self.episode_logger.write_episodes(sft_packets, sft_file, format='raw')
+                
                 sft_files[f"{task_name}_sft"] = sft_file
             
             # Merge results
@@ -150,7 +198,7 @@ class DataConverter:
                       episodes_file: str,
                       output_file: Optional[str] = None) -> str:
         """
-        Score episodes and save with quality scores.
+        Score episodes using protocol validation and save with scores.
         
         Args:
             episodes_file: Path to episodes JSONL
@@ -159,36 +207,55 @@ class DataConverter:
         Returns:
             Path to scored episodes file
         """
-        episodes = self.sft_converter.load_jsonl(Path(episodes_file))
+        # Load episodes
+        episodes = self.episode_logger.load_episodes(episodes_file)
         
-        # Score and rank episodes
-        scored_episodes = self.scorer.rank_episodes(episodes)
+        # Score each episode using protocol validator
+        for episode in episodes:
+            violations = episode.get('metrics', {}).get('protocol_violations', [])
+            action_history = episode.get('metrics', {}).get('action_history', [])
+            deal_closed = episode.get('metrics', {}).get('deal_closed', False)
+            
+            # Calculate protocol score (0-1)
+            protocol_score = calculate_protocol_score(violations, action_history, deal_closed)
+            
+            # Add scoring metadata
+            episode['meta'] = episode.get('meta', {})
+            episode['meta']['protocol_score'] = protocol_score
+            
+            # Classify quality tier based on protocol score
+            if protocol_score >= 0.9:
+                quality_tier = 'excellent'
+            elif protocol_score >= 0.7:
+                quality_tier = 'good'
+            elif protocol_score >= 0.5:
+                quality_tier = 'fair'
+            else:
+                quality_tier = 'poor'
+            
+            episode['meta']['quality_tier'] = quality_tier
         
-        # Add quality tier classification
-        for episode in scored_episodes:
-            episode['quality_tier'] = self.scorer.classify_episode_quality(episode)
-            episode['score_breakdown'] = self.scorer.get_score_breakdown(episode)
+        # Sort by protocol score (highest first)
+        episodes.sort(key=lambda e: e.get('meta', {}).get('protocol_score', 0), reverse=True)
         
-        # Save scored episodes
+        # Determine output path
         if output_file is None:
-            output_path = self.output_dir / "scored" / "scored_episodes.jsonl"
-        else:
-            output_path = Path(output_file)
+            output_file = str(self.output_dir / "scored" / "scored_episodes.jsonl")
         
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        self.sft_converter.save_jsonl(scored_episodes, output_path)
+        # Write scored episodes
+        self.episode_logger.write_episodes(episodes, output_file, format='raw')
         
         # Log statistics
-        logger.info(f"Scored {len(scored_episodes)} episodes:")
+        logger.info(f"Scored {len(episodes)} episodes:")
         tiers = {'excellent': 0, 'good': 0, 'fair': 0, 'poor': 0}
-        for ep in scored_episodes:
-            tiers[ep['quality_tier']] += 1
+        for ep in episodes:
+            tiers[ep['meta']['quality_tier']] += 1
         
         for tier, count in tiers.items():
             logger.info(f"  {tier}: {count} episodes")
         
-        logger.info(f"Saved to {output_path}")
-        return str(output_path)
+        logger.info(f"Saved to {output_file}")
+        return output_file
     
     def prepare_training_data(self,
                              episodes_file: str,
@@ -224,16 +291,23 @@ class DataConverter:
         sft_file = self.convert_episodes_to_sft(scored_file, sft_file)
         results['sft_all'] = sft_file
         
-        # 3. Filter high-quality SFT
+        # 3. Filter high-quality episodes for SFT
         logger.info("3. Filtering high-quality SFT examples...")
+        
+        # Load scored episodes and filter by protocol score
+        episodes = self.episode_logger.load_episodes(scored_file)
+        high_quality = self.episode_logger.filter_by_quality(episodes, min_score=0.8)
+        
+        # Transform to SFT and save
+        sft_packets = self.episode_logger.batch_transform_to_sft(high_quality)
         sft_good = str(base_dir / "sft" / "high_quality.jsonl")
-        sft_good = self.sft_converter.filter_by_quality(sft_file, 8.0, sft_good)
+        self.episode_logger.write_episodes(sft_packets, sft_good, format='raw')
         results['sft_high_quality'] = sft_good
         
         # 4. Auto-generate DPO pairs
         logger.info("4. Generating DPO pairs...")
         dpo_file = str(base_dir / "dpo" / "auto_pairs.jsonl")
-        dpo_file = self.auto_generate_dpo(scored_file, dpo_file)
+        dpo_file = self.auto_generate_dpo(scored_file, dpo_file, score_threshold=0.3)
         results['dpo_pairs'] = dpo_file
         
         logger.info("✓ Training data preparation complete!")
@@ -268,8 +342,8 @@ def main():
     auto_dpo_parser = subparsers.add_parser('auto-dpo', help='Auto-generate DPO pairs')
     auto_dpo_parser.add_argument('--input', required=True, help='Input episodes file')
     auto_dpo_parser.add_argument('--output', help='Output file')
-    auto_dpo_parser.add_argument('--threshold', type=float, default=5.0,
-                                help='Minimum score difference')
+    auto_dpo_parser.add_argument('--threshold', type=float, default=0.3,
+                                help='Minimum protocol score difference (0-1 scale)')
     
     # Built-in task export
     builtin_parser = subparsers.add_parser('builtin', help='Export built-in tasks')

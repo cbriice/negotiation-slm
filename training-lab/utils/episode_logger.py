@@ -428,6 +428,169 @@ class EpisodeLogger:
         logger.info(f"Created {len(pairs)} DPO pairs from {len(episodes)} episodes")
         return len(pairs)
     
+    def load_episodes(self, filepath: Union[str, Path]) -> List[Dict[str, Any]]:
+        """
+        Load all episodes from JSONL file into memory.
+        
+        Args:
+            filepath: Path to JSONL file
+            
+        Returns:
+            List of episode dictionaries
+        """
+        filepath = Path(filepath)
+        
+        if not filepath.exists():
+            logger.warning(f"File {filepath} not found")
+            return []
+        
+        episodes = []
+        with open(filepath, 'r') as f:
+            for line_num, line in enumerate(f, 1):
+                if line.strip():
+                    try:
+                        episodes.append(json.loads(line))
+                    except json.JSONDecodeError as e:
+                        logger.warning(f"Failed to parse line {line_num} in {filepath}: {e}")
+                        continue
+        
+        logger.info(f"Loaded {len(episodes)} episodes from {filepath}")
+        return episodes
+    
+    def write_episodes(self, episodes: List[Dict[str, Any]], 
+                      filepath: Union[str, Path],
+                      format: str = 'raw') -> None:
+        """
+        Write episodes directly to file without buffering.
+        
+        Args:
+            episodes: List of episodes to write
+            filepath: Output file path
+            format: Output format ('raw', 'sft', or 'dpo')
+        """
+        filepath = Path(filepath)
+        filepath.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Transform episodes based on format
+        if format == 'sft':
+            output_items = []
+            for episode in episodes:
+                packets = self.transform_to_sft_packet(episode)
+                output_items.extend(packets)
+        elif format == 'dpo':
+            # Assumes episodes are already DPO pairs
+            output_items = episodes
+        else:
+            # Raw format
+            output_items = episodes
+        
+        # Write NDJSON
+        with open(filepath, 'w') as f:
+            for item in output_items:
+                f.write(json.dumps(item) + '\n')
+        
+        logger.info(f"Wrote {len(output_items)} items to {filepath}")
+    
+    def batch_transform_to_sft(self, episodes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Transform multiple episodes to SFT format.
+        
+        Args:
+            episodes: List of episodes to transform
+            
+        Returns:
+            List of SFT packets
+        """
+        sft_packets = []
+        
+        for episode in episodes:
+            # Validate episode for training
+            from utils.protocol_validator import validate_episode_for_training
+            is_suitable, reasons = validate_episode_for_training(episode)
+            
+            if is_suitable:
+                packets = self.transform_to_sft_packet(episode)
+                sft_packets.extend(packets)
+            else:
+                logger.debug(f"Episode not suitable for SFT: {reasons}")
+        
+        logger.info(f"Transformed {len(episodes)} episodes into {len(sft_packets)} SFT packets")
+        return sft_packets
+    
+    def batch_create_dpo_pairs(self, good_episodes: List[Dict[str, Any]], 
+                               bad_episodes: List[Dict[str, Any]],
+                               max_pairs: Optional[int] = None) -> List[Dict[str, Any]]:
+        """
+        Create DPO pairs from episode lists.
+        
+        Args:
+            good_episodes: Episodes with good responses
+            bad_episodes: Episodes with bad responses  
+            max_pairs: Maximum number of pairs to create
+            
+        Returns:
+            List of DPO pair packets
+        """
+        from utils.protocol_validator import validate_episode_for_training
+        
+        dpo_pairs = []
+        
+        # Filter suitable episodes
+        good_suitable = []
+        for ep in good_episodes:
+            is_suitable, _ = validate_episode_for_training(ep)
+            if is_suitable:
+                good_suitable.append(ep)
+        
+        bad_suitable = []
+        for ep in bad_episodes:
+            is_suitable, reasons = validate_episode_for_training(ep)
+            # Bad episodes can have protocol violations but not critical issues
+            critical_issues = [r for r in reasons if 'leaked action tags' in r]
+            if not critical_issues:
+                bad_suitable.append(ep)
+        
+        # Create pairs
+        min_length = min(len(good_suitable), len(bad_suitable))
+        if max_pairs:
+            min_length = min(min_length, max_pairs)
+        
+        for i in range(min_length):
+            pair = self.transform_to_dpo_pair(good_suitable[i], bad_suitable[i])
+            if pair:
+                dpo_pairs.append(pair)
+        
+        logger.info(f"Created {len(dpo_pairs)} DPO pairs from {len(good_episodes)} good and {len(bad_episodes)} bad episodes")
+        return dpo_pairs
+    
+    def filter_by_quality(self, episodes: List[Dict[str, Any]], 
+                         min_score: float = 0.8) -> List[Dict[str, Any]]:
+        """
+        Filter episodes by protocol score quality.
+        
+        Args:
+            episodes: Episodes to filter
+            min_score: Minimum protocol score (0-1)
+            
+        Returns:
+            List of high-quality episodes
+        """
+        from utils.protocol_validator import calculate_protocol_score
+        
+        filtered = []
+        for episode in episodes:
+            violations = episode.get('metrics', {}).get('protocol_violations', [])
+            action_history = episode.get('metrics', {}).get('action_history', [])
+            deal_closed = episode.get('metrics', {}).get('deal_closed', False)
+            
+            score = calculate_protocol_score(violations, action_history, deal_closed)
+            
+            if score >= min_score:
+                filtered.append(episode)
+        
+        logger.info(f"Filtered {len(filtered)} high-quality episodes from {len(episodes)} total (min_score={min_score})")
+        return filtered
+    
     def get_statistics(self) -> Dict[str, Any]:
         """
         Get logging statistics.

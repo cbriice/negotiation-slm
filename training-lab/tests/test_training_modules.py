@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Test script for training modules functionality.
-Tests data converters, scoring, and format conversions.
+Tests DataConverter with EpisodeLogger integration.
 """
 
 import json
@@ -15,406 +15,190 @@ import os
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from training.converters.base import BaseConverter
-from training.converters.sft_converter import SFTConverter
-from training.converters.dpo_converter import DPOConverter
-from training.converters.scoring import EpisodeScorer
 from training.data_converter import DataConverter
+from training.converters.builtin_export import BuiltinTaskExporter
+from utils.episode_logger import EpisodeLogger, TrainingStage
+from utils.protocol_validator import calculate_protocol_score
 
 
-class TestBaseConverter(unittest.TestCase):
-    """Test BaseConverter functionality."""
+class TestEpisodeLogger(unittest.TestCase):
+    """Test EpisodeLogger functionality."""
     
     def setUp(self):
         self.temp_dir = tempfile.mkdtemp()
-        self.converter = BaseConverter(self.temp_dir)
+        self.logger = EpisodeLogger(base_dir=self.temp_dir, batch_size=10)
     
-    def test_save_load_jsonl(self):
-        """Test JSONL save and load operations."""
-        test_data = [
-            {"id": 1, "text": "test1"},
-            {"id": 2, "text": "test2"}
+    def test_load_write_episodes(self):
+        """Test episode load and write operations."""
+        test_episodes = [
+            {"dialogue": [{"text": "test1", "side": "agent"}], "state": {}, "meta": {}},
+            {"dialogue": [{"text": "test2", "side": "partner"}], "state": {}, "meta": {}}
         ]
         
         test_file = Path(self.temp_dir) / "test.jsonl"
-        self.converter.save_jsonl(test_data, test_file)
+        self.logger.write_episodes(test_episodes, test_file)
         
-        loaded_data = self.converter.load_jsonl(test_file)
-        self.assertEqual(len(loaded_data), 2)
-        self.assertEqual(loaded_data[0]["text"], "test1")
+        loaded_episodes = self.logger.load_episodes(test_file)
+        self.assertEqual(len(loaded_episodes), 2)
+        self.assertEqual(loaded_episodes[0]["dialogue"][0]["text"], "test1")
     
-    def test_extract_dialogue_history(self):
-        """Test dialogue history extraction."""
-        dialogue = [
-            {"text": "Hello", "side": "buyer"},
-            {"text": "Hi there", "side": "seller"},
-            {"text": "I want to buy", "side": "buyer"},
-            {"text": "What's your offer?", "side": "seller"}
-        ]
-        
-        history = self.converter.extract_dialogue_history(dialogue, 3, window_size=2)
-        self.assertEqual(len(history), 2)
-        self.assertEqual(history[0]["text"], "Hi there")
-        self.assertEqual(history[1]["text"], "I want to buy")
-
-
-class TestSFTConverter(unittest.TestCase):
-    """Test SFT conversion functionality."""
-    
-    def setUp(self):
-        self.temp_dir = tempfile.mkdtemp()
-        self.converter = SFTConverter(self.temp_dir)
-        
-        # Create sample episode
-        self.sample_episode = {
-            "state": {
-                "item": "laptop",
-                "target_price": 500,
-                "max_price": 600
-            },
+    def test_transform_to_sft_packet(self):
+        """Test SFT packet transformation."""
+        episode = {
             "dialogue": [
-                {
-                    "text": "I'm interested in the laptop",
-                    "response": "Great! It's in excellent condition.",
-                    "side": "buyer",
-                    "action": "PROPOSE"
-                },
-                {
-                    "text": "What's your best price?",
-                    "response": "I can offer it for $550",
-                    "side": "seller",
-                    "action": "PROPOSE"
-                }
+                {"text": "Hello", "side": "partner", "response": "Hi there"},
+                {"text": "Want to trade?", "side": "partner", "response": "Sure"},
             ],
-            "meta": {
-                "episode_id": "test_001",
-                "deal_closed": True,
-                "side": "buyer"
-            }
-        }
-    
-    def test_episode_to_sft(self):
-        """Test single episode conversion to SFT format."""
-        sft_examples = self.converter.episode_to_sft(self.sample_episode)
-        
-        self.assertEqual(len(sft_examples), 2)
-        
-        # Check first example structure
-        first_example = sft_examples[0]
-        self.assertIn("input", first_example)
-        self.assertIn("output", first_example)
-        self.assertIn("meta", first_example)
-        
-        # Check input fields
-        self.assertIn("state", first_example["input"])
-        self.assertIn("recent_convo", first_example["input"])
-        self.assertIn("partner_msg", first_example["input"])
-        
-        # Check output
-        self.assertEqual(first_example["output"], "Great! It's in excellent condition.")
-    
-    def test_batch_convert(self):
-        """Test batch conversion of episodes."""
-        # Create test episodes file
-        episodes_file = Path(self.temp_dir) / "test_episodes.jsonl"
-        with open(episodes_file, 'w') as f:
-            f.write(json.dumps(self.sample_episode) + '\n')
-            f.write(json.dumps(self.sample_episode) + '\n')
-        
-        output_file = self.converter.batch_convert(str(episodes_file))
-        
-        self.assertTrue(Path(output_file).exists())
-        
-        # Load and verify converted data
-        converted = self.converter.load_jsonl(Path(output_file))
-        self.assertEqual(len(converted), 4)  # 2 episodes * 2 turns each
-
-
-class TestDPOConverter(unittest.TestCase):
-    """Test DPO conversion functionality."""
-    
-    def setUp(self):
-        self.temp_dir = tempfile.mkdtemp()
-        self.converter = DPOConverter(self.temp_dir)
-        
-        # Create sample episodes
-        self.good_episode = {
-            "dialogue": [
-                {
-                    "text": "What's your offer?",
-                    "response": "I can offer $500 for the item",
-                    "side": "buyer"
-                }
-            ],
-            "meta": {"quality_score": 9.0}
+            "state": {"item": "laptop", "price": 500},
+            "meta": {"episode_id": "test_001"}
         }
         
-        self.bad_episode = {
-            "dialogue": [
-                {
-                    "text": "What's your offer?",
-                    "response": "idk whatever",
-                    "side": "buyer"
-                }
-            ],
-            "meta": {"quality_score": 2.0}
-        }
-    
-    def test_create_dpo_pair(self):
-        """Test DPO pair creation."""
-        dpo_pairs = self.converter.create_dpo_pair(
-            self.good_episode, 
-            self.bad_episode
-        )
+        sft_packets = self.logger.transform_to_sft_packet(episode)
         
-        self.assertGreater(len(dpo_pairs), 0)
-        
-        # Check first pair structure
-        first_pair = dpo_pairs[0]
-        self.assertIn("context", first_pair)
-        self.assertIn("chosen", first_pair)
-        self.assertIn("rejected", first_pair)
-        self.assertEqual(first_pair["chosen"], "I can offer $500 for the item")
-        self.assertEqual(first_pair["rejected"], "idk whatever")
-
-
-class TestEpisodeScorer(unittest.TestCase):
-    """Test episode scoring functionality."""
+        self.assertEqual(len(sft_packets), 2)
+        self.assertIn("input", sft_packets[0])
+        self.assertIn("output", sft_packets[0])
+        self.assertEqual(sft_packets[0]["output"], "Hi there")
     
-    def setUp(self):
-        self.scorer = EpisodeScorer()
-        
-        self.sample_episode = {
-            "dialogue": [
-                {"text": "Hello", "response": "Hi", "action": "PROPOSE"},
-                {"text": "Price?", "response": "$500", "action": "PROPOSE"},
-                {"text": "Deal", "response": "[COMMIT]", "action": "COMMIT"}
-            ],
-            "meta": {
-                "deal_closed": True,
-                "num_turns": 3
-            }
-        }
-    
-    def test_score_episode(self):
-        """Test episode scoring."""
-        score = self.scorer.calculate_score(self.sample_episode)
-        
-        self.assertIsInstance(score, (int, float))
-        # Score can be negative due to penalties
-        self.assertGreater(score, -50)
-        self.assertLess(score, 50)
-    
-    def test_classify_episode_quality(self):
-        """Test quality classification."""
-        quality = self.scorer.classify_episode_quality(self.sample_episode)
-        self.assertIn(quality, ["excellent", "good", "fair", "poor"])
-        # With deal_closed=True, should get a good score
-        self.assertIn(quality, ["good", "excellent"])
-    
-    def test_rank_episodes(self):
-        """Test episode ranking."""
+    def test_batch_transform_to_sft(self):
+        """Test batch SFT transformation."""
         episodes = [
-            {"dialogue": [], "meta": {"deal_closed": False}},
-            self.sample_episode,
-            {"dialogue": [{"text": "hi"}], "meta": {"deal_closed": True}}
+            {
+                "dialogue": [{"text": "test", "response": "response"}],
+                "state": {},
+                "meta": {},
+                "metrics": {}
+            }
         ]
         
-        ranked = self.scorer.rank_episodes(episodes)
+        sft_packets = self.logger.batch_transform_to_sft(episodes)
+        self.assertIsInstance(sft_packets, list)
+    
+    def test_filter_by_quality(self):
+        """Test quality filtering."""
+        episodes = [
+            {"metrics": {"protocol_violations": [], "action_history": ["PROPOSE"], "deal_closed": True}},
+            {"metrics": {"protocol_violations": ["leaked_tags"], "action_history": [], "deal_closed": False}}
+        ]
         
-        # Check all episodes have scores
-        for ep in ranked:
-            self.assertIn("quality_score", ep)
-        
-        # Check they're sorted by score
-        scores = [ep["quality_score"] for ep in ranked]
-        self.assertEqual(scores, sorted(scores, reverse=True))
+        filtered = self.logger.filter_by_quality(episodes, min_score=0.8)
+        self.assertEqual(len(filtered), 1)
 
 
 class TestDataConverter(unittest.TestCase):
-    """Test main DataConverter orchestrator."""
+    """Test DataConverter with EpisodeLogger integration."""
     
     def setUp(self):
         self.temp_dir = tempfile.mkdtemp()
         self.converter = DataConverter(self.temp_dir)
         
         # Create sample episodes file
-        self.episodes_file = Path(self.temp_dir) / "episodes.jsonl"
-        sample_episode = {
-            "state": {"item": "test"},
-            "dialogue": [
-                {
-                    "text": "Hello",
-                    "response": "Hi there",
-                    "side": "buyer"
+        self.sample_episodes = [
+            {
+                "dialogue": [
+                    {"text": "Hello", "response": "Hi", "side": "agent"},
+                    {"text": "Want to trade?", "response": "Sure", "side": "partner"}
+                ],
+                "state": {"item": "laptop"},
+                "meta": {"episode_id": "001"},
+                "metrics": {
+                    "protocol_violations": [],
+                    "action_history": ["PROPOSE", "PROPOSE"],
+                    "deal_closed": True
                 }
-            ],
-            "meta": {"episode_id": "test_001"}
-        }
+            },
+            {
+                "dialogue": [
+                    {"text": "Test", "response": "Reply", "side": "partner"},
+                    {"text": "Another turn", "response": "OK", "side": "agent"}
+                ],
+                "state": {"item": "phone"},
+                "meta": {"episode_id": "002"},
+                "metrics": {
+                    "protocol_violations": ["leaked_tags"],
+                    "action_history": ["PROPOSE", "PROPOSE"],
+                    "deal_closed": False
+                }
+            }
+        ]
         
+        self.episodes_file = Path(self.temp_dir) / "test_episodes.jsonl"
         with open(self.episodes_file, 'w') as f:
-            f.write(json.dumps(sample_episode) + '\n')
+            for episode in self.sample_episodes:
+                f.write(json.dumps(episode) + '\n')
     
     def test_convert_episodes_to_sft(self):
-        """Test SFT conversion through main converter."""
+        """Test SFT conversion through DataConverter."""
         output_file = self.converter.convert_episodes_to_sft(
             str(self.episodes_file)
         )
         
         self.assertTrue(Path(output_file).exists())
         
-        # Verify content
-        data = self.converter.sft_converter.load_jsonl(Path(output_file))
-        self.assertGreater(len(data), 0)
+        # Load and verify
+        with open(output_file, 'r') as f:
+            lines = f.readlines()
+            self.assertGreater(len(lines), 0)
     
     def test_score_episodes(self):
-        """Test episode scoring through main converter."""
+        """Test episode scoring."""
         output_file = self.converter.score_episodes(str(self.episodes_file))
         
         self.assertTrue(Path(output_file).exists())
         
-        # Verify scored content
-        data = self.converter.sft_converter.load_jsonl(Path(output_file))
-        for episode in data:
-            self.assertIn("quality_score", episode)
-            self.assertIn("quality_tier", episode)
+        # Load and verify scoring
+        episodes = self.converter.episode_logger.load_episodes(output_file)
+        self.assertEqual(len(episodes), 2)
+        
+        # Check protocol scores were added
+        for episode in episodes:
+            self.assertIn("protocol_score", episode["meta"])
+            self.assertIn("quality_tier", episode["meta"])
+    
+    def test_auto_generate_dpo(self):
+        """Test auto DPO generation."""
+        # Need episodes with score differences
+        output_file = self.converter.auto_generate_dpo(
+            str(self.episodes_file),
+            score_threshold=0.3
+        )
+        
+        self.assertTrue(Path(output_file).exists())
 
 
-class TestIntegration(unittest.TestCase):
-    """Integration tests for the full pipeline."""
+class TestBuiltinTaskExporter(unittest.TestCase):
+    """Test BuiltinTaskExporter functionality."""
     
     def setUp(self):
         self.temp_dir = tempfile.mkdtemp()
-        self.converter = DataConverter(self.temp_dir)
+        self.exporter = BuiltinTaskExporter(self.temp_dir)
+    
+    def test_parse_dealnodeal(self):
+        """Test Deal-or-No-Deal parsing."""
+        text = """context: book=3 book_value=1 hat=2 hat_value=5
+dialogue:
+YOU: I'd like 2 books
+THEM: I need the hat"""
+        labels = ["Sure, take them"]
         
-        # Create realistic test episodes
-        self.episodes = []
-        for i in range(5):
-            episode = {
-                "state": {
-                    "item": f"item_{i}",
-                    "target_price": 100 * (i + 1),
-                    "max_price": 150 * (i + 1)
-                },
-                "dialogue": [
-                    {
-                        "text": f"Interested in item_{i}",
-                        "response": f"Yes, it's available for ${150*(i+1)}",
-                        "side": "buyer",
-                        "action": "PROPOSE"
-                    },
-                    {
-                        "text": f"Can you do ${100*(i+1)}?",
-                        "response": f"How about ${125*(i+1)}?",
-                        "side": "seller",
-                        "action": "PROPOSE"
-                    }
-                ],
-                "meta": {
-                    "episode_id": f"test_{i:03d}",
-                    "deal_closed": i % 2 == 0,  # Half close deals
-                    "num_turns": 2
-                }
-            }
-            self.episodes.append(episode)
+        dialogue, state = self.exporter._parse_dealnodeal(text, labels)
         
-        # Save episodes
-        self.episodes_file = Path(self.temp_dir) / "test_episodes.jsonl"
-        with open(self.episodes_file, 'w') as f:
-            for ep in self.episodes:
-                f.write(json.dumps(ep) + '\n')
+        self.assertEqual(len(dialogue), 2)
+        self.assertIn("items", state)
+        self.assertIn("book", state["items"])
+        self.assertEqual(dialogue[-1]["response"], "Sure, take them")
     
-    def test_full_pipeline(self):
-        """Test the complete data preparation pipeline."""
-        results = self.converter.prepare_training_data(
-            str(self.episodes_file)
-        )
+    def test_save_load_jsonl(self):
+        """Test JSONL operations."""
+        test_data = [{"id": 1}, {"id": 2}]
+        test_file = Path(self.temp_dir) / "test.jsonl"
         
-        # Check all expected outputs exist
-        expected_keys = [
-            'scored_episodes',
-            'sft_all',
-            'sft_high_quality',
-            'dpo_pairs'
-        ]
+        self.exporter.save_jsonl(test_data, test_file)
+        loaded = self.exporter.load_jsonl(test_file)
         
-        for key in expected_keys:
-            self.assertIn(key, results)
-            self.assertTrue(Path(results[key]).exists(), 
-                          f"File {results[key]} should exist")
-        
-        # Verify scored episodes
-        scored_data = self.converter.sft_converter.load_jsonl(
-            Path(results['scored_episodes'])
-        )
-        self.assertEqual(len(scored_data), len(self.episodes))
-        
-        # Verify SFT data was created
-        sft_data = self.converter.sft_converter.load_jsonl(
-            Path(results['sft_all'])
-        )
-        self.assertGreater(len(sft_data), 0)
-
-
-def run_tests(verbose=True):
-    """Run all tests with optional verbosity."""
-    # Create test suite
-    loader = unittest.TestLoader()
-    suite = unittest.TestSuite()
-    
-    # Add all test classes
-    test_classes = [
-        TestBaseConverter,
-        TestSFTConverter,
-        TestDPOConverter,
-        TestEpisodeScorer,
-        TestDataConverter,
-        TestIntegration
-    ]
-    
-    for test_class in test_classes:
-        suite.addTests(loader.loadTestsFromTestCase(test_class))
-    
-    # Run tests
-    runner = unittest.TextTestRunner(verbosity=2 if verbose else 1)
-    result = runner.run(suite)
-    
-    # Print summary
-    print("\n" + "="*70)
-    print("TEST SUMMARY")
-    print("="*70)
-    print(f"Tests run: {result.testsRun}")
-    print(f"Failures: {len(result.failures)}")
-    print(f"Errors: {len(result.errors)}")
-    print(f"Skipped: {len(result.skipped)}")
-    
-    if result.wasSuccessful():
-        print("\n✅ All tests passed!")
-    else:
-        print("\n❌ Some tests failed. See details above.")
-    
-    return result.wasSuccessful()
+        self.assertEqual(len(loaded), 2)
+        self.assertEqual(loaded[0]["id"], 1)
 
 
 if __name__ == "__main__":
-    import argparse
-    
-    parser = argparse.ArgumentParser(description="Test training modules")
-    parser.add_argument("-v", "--verbose", action="store_true",
-                       help="Verbose output")
-    parser.add_argument("-t", "--test", type=str,
-                       help="Run specific test class (e.g., TestSFTConverter)")
-    
-    args = parser.parse_args()
-    
-    if args.test:
-        # Run specific test
-        suite = unittest.TestSuite()
-        suite.addTests(unittest.TestLoader().loadTestsFromName(args.test))
-        runner = unittest.TextTestRunner(verbosity=2 if args.verbose else 1)
-        result = runner.run(suite)
-        sys.exit(0 if result.wasSuccessful() else 1)
-    else:
-        # Run all tests
-        success = run_tests(args.verbose)
-        sys.exit(0 if success else 1)
+    unittest.main()

@@ -8,7 +8,7 @@ NEVER appear in agent message text. They are tracked separately as metadata.
 """
 
 import json
-from typing import Dict, Any, List, Tuple, Optional
+from typing import Dict, Any, List, Tuple, Optional, Union
 from enum import Enum
 
 class ViolationSeverity(Enum):
@@ -86,7 +86,7 @@ def check_terms_equivalence(terms1: Dict[str, Any], terms2: Dict[str, Any]) -> b
     """
     return canonicalize_terms_json(terms1) == canonicalize_terms_json(terms2)
 
-def validate_action_sequence(action_history: List[Dict[str, Any]], 
+def validate_action_sequence(action_history: List[Union[Dict[str, Any], str]], 
                             max_lookback: int = 10) -> Tuple[bool, List[str]]:
     """
     Validate action sequences follow proper protocol patterns.
@@ -95,6 +95,7 @@ def validate_action_sequence(action_history: List[Dict[str, Any]],
     
     Args:
         action_history: List of dicts with 'action' (backend tag), 'side', 'turn' keys
+                       OR list of strings (for backward compatibility)
         max_lookback: Maximum number of recent actions to validate
         
     Returns:
@@ -104,6 +105,10 @@ def validate_action_sequence(action_history: List[Dict[str, Any]],
     
     if not action_history:
         return True, []
+    
+    # Convert string format to dict format for validation
+    if action_history and isinstance(action_history[0], str):
+        action_history = [{'action': action, 'turn': i} for i, action in enumerate(action_history)]
     
     # Look at recent history
     recent = action_history[-max_lookback:] if len(action_history) > max_lookback else action_history
@@ -235,7 +240,12 @@ def calculate_protocol_score(violations: List[str],
     
     # Efficiency bonus (fewer turns is better)
     if action_history:
-        turn_count = action_history[-1].get('turn', len(action_history))
+        # Handle both dict and string formats for backward compatibility
+        if isinstance(action_history[-1], dict):
+            turn_count = action_history[-1].get('turn', len(action_history))
+        else:
+            turn_count = len(action_history)
+        
         if turn_count <= 5 and deal_completed:
             score += 0.1  # Quick negotiation bonus
         elif turn_count > 15:
