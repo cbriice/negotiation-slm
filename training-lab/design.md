@@ -1,88 +1,282 @@
-## Questions
+1. QLoRA Trainer Module (training/qlora_trainer.py)
 
-1. Model and Infrastructure:
-  - Will we be loading mistral-7b locally or via API? I see QLoRA parameters but need to confirm the model loading approach
-  - Do you have GPU access for training? The parameters suggest CUDA support
-  - Should we support distributed training across multiple GPUs?
+  Core components:
+  - SFTTrainer wrapper for negotiation dialogue fine-tuning
+  - DPOTrainer wrapper for preference optimization
+  - Model loading with 4-bit quantization via bitsandbytes
+  - LoRA adapter configuration from training_parameters.py
+  - Checkpoint management with versioning
 
-  2. ParlAI Integration:
-  - Should we use ParlAI's built-in model wrappers or create custom agents that interface with transformers/TRL directly?
-  - For the RuleAgent in DialogPartnerWorld - should this be a scripted agent or another LLM with strict prompting?
-  - How should we handle the ParlAI task inheritance for custom negotiation scenarios?
+Detailed Implementation Plan: QLoRA Trainer Module
 
-  3. Data Flow and Storage:
-  - For episode logging - should we create separate directories for each training stage (baseline, self-chat, dialog-partner)?
-  - The Prolog scoring mentioned - do you have an existing Prolog setup or should we implement rule-based scoring in Python?
-  - For the Claude API protocol checking - is this a hard requirement or can we substitute with local evaluation?
+  File: training/qlora_trainer.py
 
-  4. Training Pipeline:
-  - Should the module support automatic progression through all 11 training stages or be manually controlled?
-  - For DPO pair generation - what threshold/criteria should determine "clear separation" between good/bad examples?
-  - How should we handle the "mutators" in step 9 (typos, jitters, etc.) - random or controlled perturbations?
+  Core Architecture
 
-  5. Architecture Decisions:
-  - Single monolithic training script vs modular components (worlds/, agents/, tasks/, training/)?
-  - Should we build on ParlAI's existing Deal-or-No-Deal and Casino tasks or reimplement?
-  - Real-time metrics dashboard or just CSV logging?
+  class QLoRATrainer:
+      """
+      Unified QLoRA trainer for both SFT and DPO training of Mistral-7B.
+      Handles model initialization, training loops, and checkpoint management.
+      """
 
-# Answers
+      Components:
+      ├── Model Loading & Quantization
+      ├── LoRA Configuration
+      ├── Training Orchestration
+      ├── Checkpoint Management
+      └── Memory Optimization
 
-1.1: Locally
-1.2: Yes - my local build has an rtx 5070ti GPU with 16GB VRAM and 64GB DDR5 RAM. 
-1.3: No - this can be implemented if need be down the line but not for right now
+  1. Model Initialization (__init__ and setup_model)
 
-2.1: Put training under TRL (SFT/DPO/ORPO with QLoRA) and only use ParlAI for data generation + evaluation. Wrap HF moddel as a very thin ParlAI `Agent` so it can "play" in SelfChatWorld and DialogPartnerWorld, but don't rely on ParlAI's built-in training wrappers for the fine=tuning passes. I.e. for the first built-in Deal or No Deal/Casino passes, load them via ParlAI to export/convert the data, then run a short SFT warm-start in TRL (instead of in ParlAI's loop). 
-2.2: Scripted RuleAgent with randomized personas/tactics (including important permutations of rich conversation structure)
-2.3: Create a tiny base JSONL teacher and inherit specialized teachers from it. Like: NegotiationJSONTeacher(FixedDialogTeacher) -> SelfPlayTeacher(NegotiationJSONTeacher); RuleOpponentTeacher(NegotiationJSONTeacher); HumanEvalTeacher(NegotiationJSONTeacher)
+  Features:
+  - Load Mistral-7B with 4-bit quantization using bitsandbytes
+  - Configure BitsAndBytesConfig with nf4 quantization
+  - Initialize LoRA adapters via PEFT
+  - Setup tokenizer with proper padding tokens
+  - Device mapping for RTX 5070 Ti optimization
 
-3.1: Yes. Organization always good
-3.2: Python rule-based scoring is fine until training necessitates Prolog usage (decided later)
-3.3: This is a hard requirement but it's for evaluating entire conversations from training in a more abstract sense. Only conversations which pass a preliminary local evaluation would go through to the LLM API module so that it doesn't waste tokens on junk. 
+  Key Parameters (from training_parameters.py):
+  - LOAD_IN_4BIT = True
+  - BNB_4BIT_QUANT_TYPE = "nf4"
+  - BNB_4BIT_COMPUTE_DTYPE = torch.bfloat16
+  - R = 16, ALPHA = 32, DROPOUT = 0.05
+  - TARGET_MODULES = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+  Other parameters:
+  - TRL/Trainer: packing = True
 
-4.1: Manually controlled. Should have the ability to easily run any stage at any time, but generally it will be ran in order
-4.2: Clear violations/out-of-line behavior vs. smooth examples that check all the boxes and reach a favorable agreement
-4.3: Random within reason should be fine. Like there should be some reasoning behind the randomness but random is fine generally
+  **Important**: ANY and ALL parameters used in training code should be housed in training_parameters.py. if they don't already exist, initialize them in training_parameters.py and NO default, hardcoded parameters should exist
 
-5.1: Modular FOR SURE. Use the folders that exist to modulate
-5.2: Use the existing tasks for the warm-start training, but data will be exported as JSONL and TRL SFTTrainer will be used to run initial warm-start training. This clarification is updated in step 2 of negotiation training plan in CLAUDE.md
-5.3: a real-time metrics dashboard using Dash for the interface would be good. for numerical data, CSV logging is good. for logging and storing JSON data, NDJSON is good
+  2. SFT Training Pipeline (train_sft method)
 
+  Workflow:
+  1. Load JSONL dataset via datasets.load_dataset()
+  2. Apply chat template formatting
+  3. Initialize SFTTrainer with:
+     - model & tokenizer
+     - TrainingArguments from parameters
+     - DataCollatorForLanguageModeling
+  4. Execute training with gradient accumulation
+  5. Save LoRA adapters periodically
 
-# Implementation plan
-Phase 1: Core Infrastructure
-  1. Set up base classes for agents, teachers, and worlds
-  2. Create HF model wrapper as ParlAI Agent
-  3. Implement data conversion pipeline (ParlAI -> TRL formats)
-  4. Set up metrics tracking system with CSV logging
+  Special Handling:
+  - Two-part response support (strategy + response)
+  - Dynamic sequence length based on batch
+  - Automatic mixed precision (bf16)
+  - Gradient checkpointing for memory efficiency
 
-  Phase 2: World Integration
-  1. Implement SelfChatWorld runner with state seeding
-  2. Create DialogPartnerWorld with RuleAgent integration
-  3. Build episode logging system with NDJSON output
-  4. Add protocol validation for negotiation actions
+  3. DPO Training Pipeline (train_dpo method)
 
-  Phase 3: Training Pipeline
-  1. QLoRA trainer using TRL's SFTTrainer/DPOTrainer
-  2. Data annotation tools for identifying good/bad examples
-  3. Automated DPO pair generation from annotated episodes
-  4. Model checkpointing and versioning system
+  Workflow:
+  1. Load DPO pairs from JSONL
+  2. Format as preference dataset
+  3. Initialize DPOTrainer with:
+     - model & reference model
+     - DPO beta = 0.1
+     - Label smoothing = 0.0
+  4. Track reward margins during training
+  5. Early stopping on reward divergence
 
-  Phase 4: Evaluation & Monitoring
-  1. Rule-based protocol scorer in Python
-  2. Claude API integration for conversation evaluation
-  3. Dash dashboard for real-time metrics visualization
-  4. Statistical analysis tools for performance tracking
+  Key Features:
+  - Reference model frozen in 4-bit
+  - Chosen/rejected response processing
+  - KL divergence monitoring
+  - Reward difference tracking
 
-  Phase 5: Advanced Features
-  1. Data augmentation/mutators for robustness training
-  2. Strategy generation and training components
-  3. Human evaluation interface via ConsoleAgent
-  4. Regression testing framework
+  4. Checkpoint Management (CheckpointManager inner class)
 
-  Key Design Decisions
+  Features:
+  - Versioning: negotiation_{stage}_{version}_{timestamp}
+  - Metadata tracking in checkpoint_info.json:
+    - Training parameters
+    - Dataset statistics
+    - Performance metrics
+    - Git commit hash
+  - Adapter-only saves (small files ~30MB)
+  - Automatic best model tracking
+  - Rollback capability
 
-  1. Separation of Concerns: ParlAI handles dialogue management and data generation; TRL handles actual training
-  2. Modular Stage Execution: Each training stage can be run independently via command-line flags
-  3. Comprehensive Logging: Every episode saved as NDJSON with full metadata
-  4. Flexible Evaluation: Local rule-based scoring with optional Claude API for deeper analysis
-  5. Real-time Monitoring: Dash dashboard shows live metrics during training runs
+  Directory Structure:
+  checkpoints/
+  ├── negotiation_baseline_v1_20250113/
+  │   ├── adapter_model.bin
+  │   ├── adapter_config.json
+  │   └── checkpoint_info.json
+  ├── negotiation_sft_v2_20250114/
+  └── negotiation_dpo_v3_20250115/
+
+  5. Memory Optimization Strategies
+
+  Techniques:
+  - Gradient accumulation (effective batch = 8)
+  - Activation checkpointing via gradient_checkpointing
+  - Paged AdamW 8-bit optimizer
+  - Dynamic batch sizing based on sequence length
+  - Clear cache between evaluation rounds
+  - LoRA rank optimization (r=16 vs r=32)
+
+  VRAM Usage Estimates (16GB RTX 5070 Ti):
+  - Model (4-bit): ~3.5GB
+  - LoRA adapters: ~200MB
+  - Optimizer states: ~1GB
+  - Activations (batch=1, seq=1536): ~2GB
+  - Safety margin: ~9.3GB free
+
+  6. Training Monitoring (MetricsTracker inner class)
+
+  Tracked Metrics:
+  - Loss curves (train/eval)
+  - Learning rate schedule
+  - Gradient norms
+  - Token throughput (tps)
+  - VRAM usage
+  - Reward margins (DPO only)
+
+  Logging:
+  - TensorBoard integration
+  - CSV export for analysis
+  - Real-time console output
+  - Checkpoint performance summary
+
+  7. Integration Points
+
+  Data Pipeline:
+  - Reads from EpisodeLogger JSONL outputs
+  - Uses data_converter.py transformations
+  - Validates with protocol_validator.py
+
+  Configuration:
+  - All hyperparameters from training_parameters.py
+  - No hardcoded values
+  - Runtime validation of parameters
+
+  Testing:
+  - Integration with existing test suite
+  - Mock training for CI/CD
+  - Memory profiling utilities
+
+  8. Usage API
+
+  # Initialize trainer
+  trainer = QLoRATrainer(
+      model_name="mistralai/Mistral-7B-v0.1",
+      output_dir="models/negotiator"
+  )
+
+  # SFT training
+  trainer.train_sft(
+      train_data="data/training/sft/high_quality.jsonl",
+      eval_data="data/training/sft/eval.jsonl",
+      num_epochs=0.5
+  )
+
+  # DPO training
+  trainer.train_dpo(
+      train_data="data/training/dpo/pairs.jsonl",
+      reference_model_path="models/negotiator/sft_best",
+      num_epochs=1
+  )
+
+  # Load checkpoint
+  trainer.load_checkpoint("negotiation_sft_v2_20250114")
+
+  # Inference mode
+  response = trainer.generate(
+      prompt="I'd like to buy this item for $50",
+      max_length=256,
+      temperature=0.5
+  )
+
+  9. Error Handling & Recovery
+
+  Safeguards:
+  - Automatic checkpoint saving on crash
+  - Training state persistence
+  - OOM recovery with batch size reduction
+  - Gradient explosion detection
+  - NaN loss handling
+  - Automatic mixed precision fallback
+
+  10. Performance Optimizations
+
+  Specific to RTX 5070 Ti:
+  - Flash Attention 2 if available
+  - Tensor cores via bf16
+  - Optimized data loading (num_workers=4)
+  - Pinned memory transfers
+  - Efficient tokenization caching
+
+  Complementary Files
+
+  1. training/trainer_utils.py - Helper functions for data loading, formatting
+  2. training/callbacks.py - Custom callbacks for monitoring, early stopping
+  3. training/model_registry.py - Track all trained models and versions 
+
+### END part 1
+--------------------------------------------------------------------------------------------------------------------------------------
+
+Revised Data Annotation System
+
+  What Already Exists:
+
+  - Protocol validation & scoring - protocol_validator.py handles violations, scores, tag leak detection
+  - Episode metrics - episode_metrics.py calculates deal outcomes, token counts, negotiation dynamics
+  - Quality filtering - episode_logger.py has filter_by_quality(), validate_episode_for_training()
+  - DPO pair selection - episode_logger.py has select_and_log_dpo_pairs(), batch_create_dpo_pairs()
+
+  What's Actually Needed:
+
+  1. Annotation Interface (training/annotation/labeler.py)
+
+  Components:
+  - Interactive CLI for human review of edge cases
+  - Batch annotation with customizable criteria
+  - Integration with existing scoring functions
+  - Export annotations as metadata overlay
+
+  2. Advanced Pair Selection (training/annotation/pair_selector.py)
+
+  Features:
+  - Curriculum-based selection (easy → hard pairs)
+  - Diversity sampling to avoid overfitting
+  - Turn-specific pair generation (not just episode-level)
+  - Multi-criteria optimization beyond just protocol score
+
+  3. Quality Assurance (training/annotation/qa.py)
+
+  Purpose:
+  - Detect data drift between training stages
+  - Identify outliers that existing metrics miss
+  - Validate DPO pair contrast strength
+  - Generate training readiness reports
+
+  Integration Points:
+
+  - Use existing calculate_protocol_score() and EpisodeMetrics.calculate()
+  - Extend select_dpo_pairs() with advanced selection strategies
+  - Leverage validate_episode_for_training() as base validator
+  - Build on transform_to_sft_packet() and transform_to_dpo_pair()
+
+  The annotation system becomes a thin orchestration layer that coordinates existing functionality rather than reimplementing it. The focus shifts to human-in-the-loop
+  review, advanced selection algorithms, and quality assurance - things not already covered.
+
+-------------------------------------------------------------------------------------------------------------------------------------------
+
+4. Model Versioning System (training/model_manager.py)
+
+  Features:
+  - Checkpoint naming convention: negotiation_{phase}_{version}_{timestamp}
+  - Metadata tracking (training params, dataset stats)
+  - Model registry with performance metrics
+  - Rollback capability for regression issues
+
+5. Training Pipeline Orchestrator (training/pipeline.py)
+
+  Workflow:
+  1. Load episodes from NDJSON logs
+  2. Run annotation pipeline
+  3. Generate training datasets (SFT/DPO)
+  4. Initialize QLoRA trainer
+  5. Execute training with monitoring
+  6. Save checkpoints and metrics
+  7. Validate against held-out test set
+

@@ -95,8 +95,11 @@ class CSVLogger:
         # Read existing data if file exists and has content
         if file_path.exists() and file_path.stat().st_size > 0:
             df_existing = pd.read_csv(file_path)
-            # Concatenate with existing data
-            df_combined = pd.concat([df_existing, df_new], ignore_index=True)
+            # Concatenate with existing data - handle empty/NA properly
+            if not df_existing.empty:
+                df_combined = pd.concat([df_existing, df_new], ignore_index=True)
+            else:
+                df_combined = df_new.copy()
             # Write back to CSV
             df_combined.to_csv(file_path, index=False)
         else:
@@ -135,8 +138,11 @@ class CSVLogger:
         # Read existing data if file exists and has content
         if file_path.exists() and file_path.stat().st_size > 0:
             df_existing = pd.read_csv(file_path)
-            # Concatenate with existing data
-            df_combined = pd.concat([df_existing, df_new], ignore_index=True)
+            # Concatenate with existing data - handle empty/NA properly
+            if not df_existing.empty:
+                df_combined = pd.concat([df_existing, df_new], ignore_index=True)
+            else:
+                df_combined = df_new.copy()
             # Write back to CSV
             df_combined.to_csv(file_path, index=False)
         else:

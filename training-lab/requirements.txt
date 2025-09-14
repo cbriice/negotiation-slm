@@ -10,3 +10,5 @@ pydantic
 pandas
 parlai
 safetensors
+triton
+GPUtil
