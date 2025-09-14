@@ -59,7 +59,7 @@ Detailed Implementation Plan: QLoRA Trainer Module
   5. Save LoRA adapters periodically
 
   Special Handling:
-  - Two-part response support (strategy + response)
+  - Handles two types of responses/training data formatting (responses + strategy)
   - Dynamic sequence length based on batch
   - Automatic mixed precision (bf16)
   - Gradient checkpointing for memory efficiency
