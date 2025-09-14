@@ -1,19 +1,15 @@
 """QLoRA trainer for Mistral-7B negotiation agent training."""
 
-import os
 import gc
 import time
 from pathlib import Path
-from typing import Dict, Any, Optional, Union, List
+from typing import Dict, Any, Optional, Union, List, cast
 import torch
-from torch.utils.data import DataLoader
-from datasets import load_dataset, Dataset
+from datasets import load_dataset, Dataset, DatasetDict
 from transformers import (
-    TrainingArguments,
     DataCollatorForLanguageModeling,
-    get_linear_schedule_with_warmup
 )
-from trl import SFTTrainer, DPOTrainer
+from trl import SFTTrainer, DPOTrainer, SFTConfig, DPOConfig
 
 # Import modular components
 from .model_loader import ModelLoader
@@ -51,7 +47,7 @@ class QLoRATrainer:
         # Initialize components
         self.model_loader = ModelLoader()
         self.lora_configurator = LoRAConfigurator()
-        self.checkpoint_manager = CheckpointManager(base_dir=self.output_dir / "checkpoints")
+        self.checkpoint_manager = CheckpointManager(base_dir=str(self.output_dir / "checkpoints"))
         
         # Model and tokenizer (to be initialized)
         self.model = None
@@ -77,7 +73,7 @@ class QLoRATrainer:
         if checkpoint_path:
             # Load from checkpoint
             print(f"Loading checkpoint from: {checkpoint_path}")
-            from peft import PeftModel
+            from peft.peft_model import PeftModel
             self.model = PeftModel.from_pretrained(self.model, checkpoint_path)
         else:
             # Apply LoRA configuration
@@ -113,7 +109,7 @@ class QLoRATrainer:
         
         # Initialize metrics tracker
         self.metrics_tracker = TrainingMetricsTracker(
-            log_dir=self.log_dir,
+            log_dir=str(self.log_dir),
             stage=self.current_stage
         )
         
@@ -124,14 +120,32 @@ class QLoRATrainer:
         # Load dataset
         print(f"Loading training data from: {train_data}")
         if isinstance(train_data, str):
-            train_dataset = load_dataset('json', data_files=train_data, split='train')
+            dataset = load_dataset('json', data_files=train_data)
+            # Ensure we have a Dataset, not DatasetDict
+            if isinstance(dataset, Dataset):
+                train_dataset = dataset
+            elif isinstance(dataset, DatasetDict):
+                # It's a DatasetDict, get the train split or first available split
+                train_dataset = dataset.get('train', list(dataset.values())[0])
+            else:
+                # Assume it's already a usable dataset format
+                train_dataset = dataset
         else:
             train_dataset = train_data
         
         eval_dataset = None
         if eval_data:
             if isinstance(eval_data, str):
-                eval_dataset = load_dataset('json', data_files=eval_data, split='train')
+                dataset = load_dataset('json', data_files=eval_data)
+                # Ensure we have a Dataset, not DatasetDict
+                if isinstance(dataset, Dataset):
+                    eval_dataset = dataset
+                elif isinstance(dataset, DatasetDict):
+                    # It's a DatasetDict, get the train split or first available split
+                    eval_dataset = dataset.get('train', list(dataset.values())[0])
+                else:
+                    # Assume it's already a usable dataset format
+                    eval_dataset = dataset
             else:
                 eval_dataset = eval_data
         
@@ -142,6 +156,13 @@ class QLoRATrainer:
         )
         
         # Initialize trainer
+        if self.tokenizer is None:
+            raise ValueError("Tokenizer not initialized. Call setup_model() first.")
+
+        # Type cast datasets to ensure compatibility
+        train_dataset = cast(Dataset, train_dataset)  # Type assertion for compatibility
+        eval_dataset = cast(Optional[Dataset], eval_dataset) if eval_dataset else None
+
         trainer = SFTTrainer(
             model=self.model,
             tokenizer=self.tokenizer,
@@ -153,8 +174,6 @@ class QLoRATrainer:
                 mlm=False
             ),
             formatting_func=self._format_sft_examples,
-            max_seq_length=params.MAX_SEQ_LEN,
-            packing=params.PACKING,
             callbacks=[self._get_metrics_callback()]
         )
         
@@ -162,7 +181,7 @@ class QLoRATrainer:
         print(f"Starting SFT training for {training_args.num_train_epochs} epochs")
         start_time = time.time()
         
-        train_result = trainer.train(resume_from_checkpoint=resume_from_checkpoint)
+        train_result = trainer.train(resume_from_checkpoint=resume_from_checkpoint if resume_from_checkpoint else None)
         
         # Save checkpoint
         final_metrics = {
@@ -220,7 +239,7 @@ class QLoRATrainer:
         
         # Initialize metrics tracker
         self.metrics_tracker = TrainingMetricsTracker(
-            log_dir=self.log_dir,
+            log_dir=str(self.log_dir),
             stage=self.current_stage
         )
         
@@ -242,7 +261,16 @@ class QLoRATrainer:
         eval_dataset = None
         if eval_data:
             if isinstance(eval_data, str):
-                eval_dataset = load_dataset('json', data_files=eval_data, split='train')
+                dataset = load_dataset('json', data_files=eval_data)
+                # Ensure we have a Dataset, not DatasetDict
+                if isinstance(dataset, Dataset):
+                    eval_dataset = dataset
+                elif isinstance(dataset, DatasetDict):
+                    # It's a DatasetDict, get the train split or first available split
+                    eval_dataset = dataset.get('train', list(dataset.values())[0])
+                else:
+                    # Assume it's already a usable dataset format
+                    eval_dataset = dataset
             else:
                 eval_dataset = eval_data
         
@@ -253,6 +281,13 @@ class QLoRATrainer:
         )
         
         # Initialize DPO trainer
+        if self.tokenizer is None:
+            raise ValueError("Tokenizer not initialized. Call setup_model() first.")
+
+        # Type cast datasets to ensure compatibility
+        train_dataset = cast(Dataset, train_dataset)  # Type assertion for compatibility
+        eval_dataset = cast(Optional[Dataset], eval_dataset) if eval_dataset else None
+
         trainer = DPOTrainer(
             model=self.model,
             ref_model=ref_model,
@@ -260,10 +295,6 @@ class QLoRATrainer:
             train_dataset=train_dataset,
             eval_dataset=eval_dataset,
             args=training_args,
-            beta=params.DPO_BETA,
-            label_smoothing=params.DPO_LABEL_SMOOTH,
-            max_prompt_length=params.DPO_MAX_PROMPT_LEN,
-            max_length=params.MAX_SEQ_LEN,
             callbacks=[self._get_dpo_metrics_callback()]
         )
         
@@ -305,9 +336,9 @@ class QLoRATrainer:
         self.current_version += 1
         return summary
     
-    def _get_sft_training_args(self, num_epochs: Optional[float], max_steps: int) -> TrainingArguments:
+    def _get_sft_training_args(self, num_epochs: Optional[float], max_steps: int) -> SFTConfig:
         """Get SFT training arguments from parameters."""
-        return TrainingArguments(
+        return SFTConfig(
             output_dir=str(self.output_dir / "sft_checkpoints"),
             num_train_epochs=num_epochs if num_epochs is not None else (max_steps / 1000),  # Rough estimate
             max_steps=max_steps,
@@ -325,15 +356,21 @@ class QLoRATrainer:
             evaluation_strategy=params.EVAL_STRATEGY,
             seed=params.SEED,
             remove_unused_columns=False,
-            report_to=["none"],  # Disable wandb/tensorboard by default
+            report_to="none",  # Disable wandb/tensorboard by default
             dataloader_num_workers=4,
-            dataloader_pin_memory=True
+            dataloader_pin_memory=True,
+            max_seq_length=params.MAX_SEQ_LEN,
+            packing=params.PACKING
         )
     
-    def _get_dpo_training_args(self, num_epochs: Optional[float], max_steps: int) -> TrainingArguments:
+    def _get_dpo_training_args(self, num_epochs: Optional[float], max_steps: int) -> DPOConfig:
         """Get DPO training arguments from parameters."""
-        return TrainingArguments(
+        return DPOConfig(
             output_dir=str(self.output_dir / "dpo_checkpoints"),
+            beta=params.DPO_BETA,
+            label_smoothing=params.DPO_LABEL_SMOOTH,
+            max_prompt_length=params.DPO_MAX_PROMPT_LEN,
+            max_length=params.MAX_SEQ_LEN,
             num_train_epochs=num_epochs if num_epochs is not None else (max_steps / 1000),
             max_steps=max_steps,
             per_device_train_batch_size=params.PER_DEVICE_BATCH_SIZE,
@@ -350,7 +387,7 @@ class QLoRATrainer:
             evaluation_strategy=params.EVAL_STRATEGY,
             seed=params.SEED,
             remove_unused_columns=False,
-            report_to=["none"],
+            report_to="none",
             dataloader_num_workers=4,
             dataloader_pin_memory=True
         )
@@ -381,7 +418,7 @@ class QLoRATrainer:
             def __init__(self, metrics_tracker):
                 self.metrics_tracker = metrics_tracker
             
-            def on_log(self, args, state, control, logs=None, **kwargs):
+            def on_log(self, args, state, control, logs=None, **kwargs):  # pylint: disable=unused-argument
                 if logs:
                     # Extract relevant metrics
                     metrics = {
@@ -414,7 +451,7 @@ class QLoRATrainer:
             def __init__(self, metrics_tracker):
                 self.metrics_tracker = metrics_tracker
             
-            def on_log(self, args, state, control, logs=None, **kwargs):
+            def on_log(self, args, state, control, logs=None, **kwargs):  # pylint: disable=unused-argument
                 if logs:
                     # Extract DPO-specific metrics
                     metrics = {
@@ -440,7 +477,7 @@ class QLoRATrainer:
         self,
         prompt: str,
         max_length: int = 256,
-        temperature: float = None,
+        temperature: Optional[float] = None,
         top_p: float = 0.95,
         do_sample: bool = True
     ) -> str:
@@ -460,9 +497,11 @@ class QLoRATrainer:
         if self.model is None:
             raise ValueError("Model not initialized. Call setup_model() first.")
         
-        temperature = temperature or params.MODEL_TEMP
+        temperature = temperature if temperature is not None else params.MODEL_TEMP
         
         # Tokenize input
+        if self.tokenizer is None:
+            raise ValueError("Tokenizer not initialized. Call setup_model() first.")
         inputs = self.tokenizer(prompt, return_tensors="pt").to(self.model.device)
         
         # Generate
@@ -473,11 +512,13 @@ class QLoRATrainer:
                 temperature=temperature,
                 top_p=top_p,
                 do_sample=do_sample,
-                pad_token_id=self.tokenizer.pad_token_id,
-                eos_token_id=self.tokenizer.eos_token_id
+                pad_token_id=self.tokenizer.pad_token_id if self.tokenizer else None,
+                eos_token_id=self.tokenizer.eos_token_id if self.tokenizer else None
             )
         
         # Decode
+        if self.tokenizer is None:
+            raise ValueError("Tokenizer not initialized.")
         response = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
         
         # Remove prompt from response
