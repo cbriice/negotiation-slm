@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
 import torch
 import numpy as np
-from torch.utils.data import Dataset
 from datasets import Dataset as HFDataset
 from transformers import (
     TrainingArguments,
@@ -24,93 +23,13 @@ from training.model_loader import ModelLoader
 from training.lora_config import LoRAConfigurator
 from training.checkpoint_manager import CheckpointManager
 from training.metrics_tracker import TrainingMetricsTracker
+from utils.dataset_loader import UnifiedDatasetLoader
 import training_parameters as params
 
 logger = logging.getLogger(__name__)
 
 
-class DPODataset(Dataset):
-    """Custom dataset for DPO training from NDJSON files."""
-
-    def __init__(self, data_path: str, tokenizer: AutoTokenizer, max_length: Optional[int] = None):
-        """
-        Initialize DPO dataset.
-
-        Args:
-            data_path: Path to NDJSON file with DPO pairs
-            tokenizer: Tokenizer for processing text
-            max_length: Maximum sequence length
-        """
-        self.tokenizer = tokenizer
-        self.max_length = max_length or params.MAX_SEQ_LEN
-        self.max_prompt_length = params.DPO_MAX_PROMPT_LEN
-        self.data = self._load_data(data_path)
-
-    def _load_data(self, data_path: str) -> List[Dict]:
-        """Load DPO pairs from NDJSON file."""
-        data = []
-        with open(data_path, 'r') as f:
-            for line in f:
-                if line.strip():
-                    item = json.loads(line)
-                    # Validate required fields
-                    if all(k in item for k in ['context', 'chosen', 'rejected']):
-                        data.append(item)
-                    else:
-                        logger.warning(f"Skipping invalid DPO pair: missing required fields")
-
-        logger.info(f"Loaded {len(data)} DPO pairs from {data_path}")
-        return data
-
-    def _format_prompt(self, context: Dict) -> str:
-        """Format context into a prompt string."""
-        state = context.get('state', {})
-        recent_convo = context.get('recent_convo', [])
-        partner_msg = context.get('partner_msg', '')
-
-        # Build prompt
-        prompt_parts = []
-
-        # Add state information if present
-        if state:
-            state_str = json.dumps(state, indent=2)
-            prompt_parts.append(f"Negotiation State:\n{state_str}")
-
-        # Add conversation history
-        if recent_convo:
-            prompt_parts.append("\nRecent Conversation:")
-            for turn in recent_convo:
-                side = turn.get('side', 'unknown')
-                text = turn.get('text', '')
-                if text:
-                    prompt_parts.append(f"{side}: {text}")
-                response = turn.get('response', '')
-                if response:
-                    prompt_parts.append(f"You: {response}")
-
-        # Add current partner message
-        if partner_msg:
-            prompt_parts.append(f"\nPartner: {partner_msg}")
-            prompt_parts.append("You:")
-
-        return "\n".join(prompt_parts)
-
-    def __len__(self):
-        return len(self.data)
-
-    def __getitem__(self, idx):
-        """Get a single DPO training example."""
-        item = self.data[idx]
-
-        # Format prompt from context
-        prompt = self._format_prompt(item['context'])
-
-        # Return in format expected by TRL's DPOTrainer
-        return {
-            'prompt': prompt,
-            'chosen': item['chosen'],
-            'rejected': item['rejected']
-        }
+# DPODataset class removed - functionality moved to UnifiedDatasetLoader
 
 
 class DPOTrainingModule:
@@ -139,6 +58,7 @@ class DPOTrainingModule:
         # Initialize components
         self.checkpoint_manager = CheckpointManager(str(self.output_dir))
         self.metrics_tracker = TrainingMetricsTracker(log_dir=str(self.output_dir / "metrics"), stage="dpo")
+        self.dataset_loader = UnifiedDatasetLoader()
 
         # Track training state
         self.reward_margins = []
@@ -148,32 +68,17 @@ class DPOTrainingModule:
 
     def prepare_dataset(self, data_path: str, tokenizer: AutoTokenizer) -> HFDataset:
         """
-        Prepare dataset for DPO training.
+        Prepare dataset for DPO training using UnifiedDatasetLoader.
 
         Args:
             data_path: Path to NDJSON file with DPO pairs
-            tokenizer: Tokenizer for processing
+            tokenizer: Tokenizer for processing (kept for compatibility)
 
         Returns:
             HuggingFace Dataset ready for DPOTrainer
         """
-        # Load custom dataset
-        dataset = DPODataset(data_path, tokenizer)
-
-        # Convert to HuggingFace Dataset format
-        data_dict = {
-            'prompt': [],
-            'chosen': [],
-            'rejected': []
-        }
-
-        for i in range(len(dataset)):
-            item = dataset[i]
-            data_dict['prompt'].append(item['prompt'])
-            data_dict['chosen'].append(item['chosen'])
-            data_dict['rejected'].append(item['rejected'])
-
-        hf_dataset = HFDataset.from_dict(data_dict)
+        # Load and preprocess using unified loader
+        hf_dataset = self.dataset_loader.load_dpo_dataset(data_path)
 
         logger.info(f"Prepared {len(hf_dataset)} DPO pairs for training")
         return hf_dataset

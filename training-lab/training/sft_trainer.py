@@ -24,6 +24,7 @@ from .model_loader import ModelLoader
 from .lora_config import LoRAConfigurator
 from .checkpoint_manager import CheckpointManager
 from .metrics_tracker import TrainingMetricsTracker
+from utils.dataset_loader import UnifiedDatasetLoader
 import training_parameters as params
 
 # Configure logging
@@ -62,6 +63,7 @@ class SFTTrainingPipeline:
         self.model_loader = ModelLoader()
         self.lora_configurator = LoRAConfigurator()
         self.checkpoint_manager = CheckpointManager(base_dir=self.checkpoint_dir)
+        self.dataset_loader = UnifiedDatasetLoader()
 
         # Model and tokenizer (initialized during setup)
         self.model = None
@@ -73,6 +75,7 @@ class SFTTrainingPipeline:
     def load_ndjson_dataset(self, file_path: str) -> Dataset:
         """
         Load and parse NDJSON file into HuggingFace Dataset.
+        Now delegates to UnifiedDatasetLoader.
 
         Args:
             file_path: Path to NDJSON file
@@ -81,35 +84,12 @@ class SFTTrainingPipeline:
             HuggingFace Dataset object
         """
         logger.info(f"Loading dataset from: {file_path}")
-
-        data = []
-        invalid_lines = 0
-        with open(file_path, 'r') as f:
-            for line_num, line in enumerate(f, 1):
-                try:
-                    item = json.loads(line.strip())
-                    data.append(item)
-                except json.JSONDecodeError as e:
-                    logger.warning(f"Skipping invalid JSON at line {line_num}: {e}")
-                    invalid_lines += 1
-                    continue
-
-        if not data:
-            logger.error(f"No valid data found in {file_path}")
-            raise ValueError(f"No valid data found in {file_path}")
-
-        logger.info(f"Successfully loaded {len(data)} examples from NDJSON")
-        if invalid_lines > 0:
-            logger.warning(f"Skipped {invalid_lines} invalid lines")
-
-        # Convert to Dataset
-        dataset = Dataset.from_list(data)
-        return dataset
+        return self.dataset_loader.load_dataset_auto(file_path)
 
     def format_chat_template(self, example: Dict[str, Any]) -> str:
         """
         Format training example using chat template.
-        Supports both dialogue format and instruction-response format.
+        Now delegates to UnifiedDatasetLoader for consistency.
 
         Args:
             example: Single training example
@@ -117,60 +97,12 @@ class SFTTrainingPipeline:
         Returns:
             Formatted text for training
         """
-        # Check if it's dialogue format (list of turns)
-        if 'dialogue' in example:
-            formatted = ""
-            for turn in example['dialogue']:
-                role = turn.get('role', 'user')
-                content = turn.get('content', turn.get('text', ''))
-
-                # Use simple format for now, can be enhanced with proper chat templates
-                if role == 'assistant':
-                    formatted += f"Assistant: {content}\n"
-                else:
-                    formatted += f"User: {content}\n"
-
-            return formatted.strip()
-
-        # Check if it's instruction-response format
-        elif 'instruction' in example and 'response' in example:
-            instruction = example['instruction']
-            response = example['response']
-
-            # Format as instruction-following
-            formatted = f"### Instruction:\n{instruction}\n\n### Response:\n{response}"
-            return formatted
-
-        # Check if it's input-output format (from SFT packet template)
-        elif 'input' in example and 'output' in example:
-            input_data = example['input']
-            output = example['output']
-
-            # Build context from input components
-            context = ""
-            if isinstance(input_data, dict):
-                if 'state' in input_data and input_data['state']:
-                    context += f"State: {json.dumps(input_data['state'])}\n"
-                if 'recent_convo' in input_data and input_data['recent_convo']:
-                    context += f"Recent conversation: {json.dumps(input_data['recent_convo'])}\n"
-                if 'partner_msg' in input_data and input_data['partner_msg']:
-                    context += f"Partner: {input_data['partner_msg']}\n"
-            else:
-                context = str(input_data)
-
-            formatted = f"### Context:\n{context}\n### Response:\n{output}"
-            return formatted
-
-        # Fallback: treat as plain text
-        elif 'text' in example:
-            return example['text']
-
-        else:
-            raise ValueError(f"Unknown example format: {example.keys()}")
+        return self.dataset_loader.format_sft_dialogue(example)
 
     def preprocess_dataset(self, dataset: Dataset) -> Dataset:
         """
         Preprocess dataset for SFT training.
+        Now delegates to UnifiedDatasetLoader.
 
         Args:
             dataset: Raw dataset
@@ -178,39 +110,12 @@ class SFTTrainingPipeline:
         Returns:
             Preprocessed dataset with 'text' field
         """
-        def add_text_field(examples):
-            """Add formatted text field to examples."""
-            texts = []
-            for i in range(len(next(iter(examples.values())))):
-                # Extract single example
-                example = {k: v[i] for k, v in examples.items()}
-
-                # Format using chat template
-                try:
-                    text = self.format_chat_template(example)
-                    texts.append(text)
-                except Exception as e:
-                    logger.warning(f"Failed to format example {i}: {e}")
-                    texts.append("")  # Add empty string to maintain alignment
-
-            return {"text": texts}
-
-        # Apply formatting
-        dataset = dataset.map(
-            add_text_field,
-            batched=True,
-            desc="Formatting examples"
+        preprocessed = self.dataset_loader.preprocess_sft_dataset(
+            dataset,
+            format_func=self.format_chat_template
         )
-
-        # Filter out empty texts
-        original_size = len(dataset)
-        dataset = dataset.filter(lambda x: len(x['text']) > 0)
-        filtered = original_size - len(dataset)
-
-        logger.info(f"Preprocessed {len(dataset)} examples")
-        if filtered > 0:
-            logger.warning(f"Filtered out {filtered} empty examples")
-        return dataset
+        logger.info(f"Preprocessed {len(preprocessed)} examples")
+        return preprocessed
 
     def setup_model(self, resume_from: Optional[str] = None):
         """
