@@ -167,27 +167,27 @@ class CheckpointManager:
     def load_checkpoint(self, checkpoint_path: str):
         """
         Load checkpoint metadata and verify files.
-        
+
         Args:
             checkpoint_path: Path to checkpoint directory
-            
+
         Returns:
             Dict with checkpoint info
         """
         logger.info(f"Loading checkpoint from: {checkpoint_path}")
-        checkpoint_path = Path(checkpoint_path)
-        
-        if not checkpoint_path.exists():
+        path_obj = Path(checkpoint_path)
+
+        if not path_obj.exists():
             # Try to find in base directory
-            checkpoint_path = self.base_dir / checkpoint_path
-            logger.debug(f"Checkpoint not found, trying base directory: {checkpoint_path}")
-            
-        if not checkpoint_path.exists():
-            logger.error(f"Checkpoint not found: {checkpoint_path}")
-            raise ValueError(f"Checkpoint not found: {checkpoint_path}")
-            
+            path_obj = self.base_dir / checkpoint_path
+            logger.debug(f"Checkpoint not found, trying base directory: {path_obj}")
+
+        if not path_obj.exists():
+            logger.error(f"Checkpoint not found: {path_obj}")
+            raise ValueError(f"Checkpoint not found: {path_obj}")
+
         # Load metadata
-        metadata_path = checkpoint_path / "checkpoint_info.json"
+        metadata_path = path_obj / "checkpoint_info.json"
         logger.debug(f"Loading metadata from {metadata_path}")
         try:
             with open(metadata_path, "r") as f:
@@ -196,23 +196,23 @@ class CheckpointManager:
         except Exception as e:
             logger.error(f"Failed to load metadata: {e}")
             raise
-            
+
         # Verify required files exist
         required_files = [
             "adapter_model.bin",
             "adapter_config.json"
         ]
-        
+
         for file in required_files:
-            if not (checkpoint_path / file).exists():
+            if not (path_obj / file).exists():
                 warning_msg = f"{file} not found in checkpoint"
                 print(f"Warning: {warning_msg}")  # Keep print for visibility
                 logger.warning(warning_msg)
             else:
                 logger.debug(f"Verified file exists: {file}")
-                
-        metadata["checkpoint_path"] = str(checkpoint_path)
-        logger.info(f"Checkpoint loaded successfully from {checkpoint_path}")
+
+        metadata["checkpoint_path"] = str(path_obj)
+        logger.info(f"Checkpoint loaded successfully from {path_obj}")
         return metadata
     
     def get_best_checkpoint(self, stage: str, metric: str = "loss") -> Optional[str]:
