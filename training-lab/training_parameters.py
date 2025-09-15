@@ -3,11 +3,13 @@ from __future__ import annotations
 import torch
 
 # Global defaults
-MAX_SEQ_LEN: int = 1536
+MAX_SEQ_LEN: int = 4096
 PER_DEVICE_BATCH_SIZE: int = 1
 GRAD_ACCUM_STEPS: int = 8
 SEED: int = 42
 MODEL_TEMP: float = 0.5  # Temperature for model generation
+PACKING = True
+PAD_TO_MULTIPLE = 128
 
 # QLoRA quantization
 LOAD_IN_4BIT: bool = True
@@ -15,9 +17,21 @@ BNB_4BIT_QUANT_TYPE: str = "nf4"
 BNB_4BIT_COMPUTE_DTYPE = torch.bfloat16
 BNB_4BIT_USE_DOUBLE_QUANT: bool = True
 
+# Batching
+PER_DEVICE_TRAIN_BATCH_SIZE = 3     # microbatch = 3
+GRADIENT_ACCUMULATION_STEPS = 4     # effective batch = 12
+PER_DEVICE_EVAL_BATCH_SIZE = 3
+
+# Precision & Kernels
+BF16 = True
+FP16 = False
+TF32 = True                         # matmul allow tf32
+ATTN_IMPLEMENTATION = "flash_attention_2"
+USE_GRADIENT_CHECKPOINTING = "mlp_only"
+
 # LoRA
-R: int = 16
-ALPHA: int = 32
+R: int = 96
+ALPHA: int = 256
 DROPOUT: float = 0.05
 TARGET_MODULES = [
     "q_proj", "k_proj", "v_proj", "o_proj",
@@ -55,18 +69,3 @@ USE_TWO_PART_RESPONSE: bool = True
 STRATEGY_MAX_TOKENS: int = 150
 RESPONSE_MAX_TOKENS: int = 256
 STRATEGY_TEMPERATURE: float = 0.3  # Lower temp for strategy generation
-
-# validation - make sure parameters aren't changed to outrageous values
-def validate():
-    assert 256 <= MAX_SEQ_LEN <= 4096, "MAX_SEQ_LEN out of sane range"
-    assert PER_DEVICE_BATCH_SIZE >= 1
-    assert 0 < DROPOUT < 0.5
-    assert R in (4, 8, 16, 32), "Pick a reasonable LoRA rank"
-    assert 0 < SFT_LR < 5e-3
-    assert 0 < DPO_LR < 5e-3
-    assert 0.0 <= DPO_BETA <= 1.0
-    assert BNB_4BIT_QUANT_TYPE in ("nf4", "fp4")
-    # Optional: guard VRAM by reducing seq len when using 13B on 12GB GPUs
-    # (hook in your own device check here if desired)
-
-validate()

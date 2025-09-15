@@ -104,22 +104,9 @@ Detailed Implementation Plan: QLoRA Trainer Module
   ├── negotiation_sft_v2_20250114/
   └── negotiation_dpo_v3_20250115/
 
-  5. Memory Optimization Strategies
+  ===================================================== ABOVE HERE IS DONE ===================================================
 
-  Techniques:
-  - Gradient accumulation (effective batch = 8)
-  - Activation checkpointing via gradient_checkpointing
-  - Paged AdamW 8-bit optimizer
-  - Dynamic batch sizing based on sequence length
-  - Clear cache between evaluation rounds
-  - LoRA rank optimization (r=16 vs r=32)
-
-  VRAM Usage Estimates (16GB RTX 5070 Ti):
-  - Model (4-bit): ~3.5GB
-  - LoRA adapters: ~200MB
-  - Optimizer states: ~1GB
-  - Activations (batch=1, seq=1536): ~2GB
-  - Safety margin: ~9.3GB free
+  =========================================================== TODO ===========================================================
 
   6. Training Monitoring (MetricsTracker inner class)
 
