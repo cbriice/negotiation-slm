@@ -4,9 +4,10 @@ import os
 import json
 import shutil
 import logging
+import time
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List, Tuple
 import torch
 
 # Set up logging
@@ -19,13 +20,15 @@ class CheckpointManager:
     def __init__(self, base_dir: str = "checkpoints"):
         """
         Initialize checkpoint manager.
-        
+
         Args:
             base_dir: Base directory for storing checkpoints
         """
         self.base_dir = Path(base_dir)
         self.base_dir.mkdir(parents=True, exist_ok=True)
         self.current_checkpoint = None
+        self.training_start_time = None
+        self.rollback_history = []
         logger.info(f"CheckpointManager initialized with base_dir: {self.base_dir}")
     
     def _make_json_serializable(self, obj: Any) -> Any:
@@ -78,11 +81,12 @@ class CheckpointManager:
         stage: str,
         version: int,
         metrics: Dict[str, Any],
-        training_args: Optional[Dict] = None
+        training_args: Optional[Dict] = None,
+        dataset_stats: Optional[Dict[str, Any]] = None
     ) -> str:
         """
         Save model checkpoint with metadata.
-        
+
         Args:
             model: PEFT model to save
             tokenizer: Tokenizer to save
@@ -90,10 +94,15 @@ class CheckpointManager:
             version: Version number
             metrics: Performance metrics
             training_args: Training arguments used
-            
+            dataset_stats: Dataset statistics (num_examples, avg_length, etc.)
+
         Returns:
             Path to saved checkpoint
         """
+        # Track training duration if start time is set
+        training_duration = None
+        if self.training_start_time:
+            training_duration = time.time() - self.training_start_time
         # Create checkpoint directory name
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         checkpoint_name = f"negotiation_{stage}_v{version}_{timestamp}"
@@ -122,6 +131,17 @@ class CheckpointManager:
             logger.error(f"Failed to save tokenizer: {e}")
             raise
         
+        # Get checkpoint size info
+        checkpoint_size_mb = None
+        try:
+            # Calculate size after saving model
+            total_size = sum(
+                f.stat().st_size for f in checkpoint_path.rglob('*') if f.is_file()
+            ) if checkpoint_path.exists() else 0
+            checkpoint_size_mb = total_size / (1024 * 1024)
+        except:
+            pass
+
         # Create metadata - use recursive serialization helper
         metadata = {
             "stage": stage,
@@ -129,10 +149,13 @@ class CheckpointManager:
             "timestamp": timestamp,
             "metrics": self._make_json_serializable(metrics),
             "training_args": self._make_json_serializable(training_args or {}),
+            "dataset_stats": self._make_json_serializable(dataset_stats or {}),
             "model_type": "LoRA adapters",
             "base_model": self._make_json_serializable(
                 getattr(model, "name_or_path", "mistralai/Mistral-7B-v0.1")
-            )
+            ),
+            "training_duration_seconds": training_duration,
+            "checkpoint_size_mb": checkpoint_size_mb
         }
         
         # Try to add git commit hash
@@ -323,3 +346,234 @@ class CheckpointManager:
                     logger.error(f"Failed to remove checkpoint {checkpoint_path.name}: {e}")
         
         logger.info(f"Cleanup complete: removed {deleted_count} checkpoints")
+
+    def rollback_to_checkpoint(self, checkpoint_path: str) -> Dict[str, Any]:
+        """
+        Rollback to a previous checkpoint.
+
+        Args:
+            checkpoint_path: Path to checkpoint to rollback to
+
+        Returns:
+            Dict with rollback information
+        """
+        logger.info(f"Rolling back to checkpoint: {checkpoint_path}")
+
+        # Backup current checkpoint if exists
+        if self.current_checkpoint:
+            self.rollback_history.append({
+                "from": str(self.current_checkpoint),
+                "to": checkpoint_path,
+                "timestamp": datetime.now().isoformat()
+            })
+            logger.debug(f"Added rollback to history: {self.current_checkpoint} -> {checkpoint_path}")
+
+        # Load the checkpoint to verify it exists
+        checkpoint_info = self.load_checkpoint(checkpoint_path)
+
+        # Update current checkpoint
+        self.current_checkpoint = Path(checkpoint_info["checkpoint_path"])
+
+        logger.info(f"Successfully rolled back to: {self.current_checkpoint}")
+        return {
+            "rolled_back_to": str(self.current_checkpoint),
+            "checkpoint_info": checkpoint_info,
+            "rollback_history": self.rollback_history
+        }
+
+    def get_checkpoint_history(self, stage: Optional[str] = None) -> List[Dict[str, Any]]:
+        """
+        Get history of checkpoints for potential rollback.
+
+        Args:
+            stage: Optional filter by stage
+
+        Returns:
+            List of checkpoint info sorted by timestamp (newest first)
+        """
+        logger.info(f"Getting checkpoint history" + (f" for stage={stage}" if stage else ""))
+        checkpoints = self.list_checkpoints(stage)
+
+        # Sort by timestamp, newest first
+        checkpoints.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
+
+        # Add rollback status
+        for checkpoint in checkpoints:
+            checkpoint["is_current"] = (
+                str(self.current_checkpoint) == checkpoint.get("path")
+                if self.current_checkpoint else False
+            )
+
+        logger.debug(f"Found {len(checkpoints)} checkpoints in history")
+        return checkpoints
+
+    def get_next_version(self, stage: str) -> int:
+        """
+        Get the next version number for a given stage.
+
+        Args:
+            stage: Training stage
+
+        Returns:
+            Next version number to use
+        """
+        logger.info(f"Getting next version for stage={stage}")
+        max_version = 0
+
+        for checkpoint_dir in self.base_dir.iterdir():
+            if not checkpoint_dir.is_dir():
+                continue
+
+            if f"negotiation_{stage}" not in checkpoint_dir.name:
+                continue
+
+            # Extract version from name pattern: negotiation_{stage}_v{version}_{timestamp}
+            try:
+                parts = checkpoint_dir.name.split('_')
+                for part in parts:
+                    if part.startswith('v') and part[1:].isdigit():
+                        version = int(part[1:])
+                        if version > max_version:
+                            max_version = version
+                        break
+            except Exception as e:
+                logger.debug(f"Could not parse version from {checkpoint_dir.name}: {e}")
+                continue
+
+        next_version = max_version + 1
+        logger.info(f"Next version for stage={stage}: {next_version}")
+        return next_version
+
+    def compare_checkpoints(self, checkpoint1: str, checkpoint2: str) -> Dict[str, Any]:
+        """
+        Compare two checkpoints to show differences.
+
+        Args:
+            checkpoint1: Path to first checkpoint
+            checkpoint2: Path to second checkpoint
+
+        Returns:
+            Dict showing differences between checkpoints
+        """
+        logger.info(f"Comparing checkpoints: {checkpoint1} vs {checkpoint2}")
+
+        info1 = self.load_checkpoint(checkpoint1)
+        info2 = self.load_checkpoint(checkpoint2)
+
+        comparison = {
+            "checkpoint1": {
+                "path": checkpoint1,
+                "stage": info1.get("stage"),
+                "version": info1.get("version"),
+                "timestamp": info1.get("timestamp")
+            },
+            "checkpoint2": {
+                "path": checkpoint2,
+                "stage": info2.get("stage"),
+                "version": info2.get("version"),
+                "timestamp": info2.get("timestamp")
+            },
+            "metrics_diff": {},
+            "dataset_stats_diff": {},
+            "training_args_diff": {}
+        }
+
+        # Compare metrics
+        metrics1 = info1.get("metrics", {})
+        metrics2 = info2.get("metrics", {})
+        all_metric_keys = set(metrics1.keys()) | set(metrics2.keys())
+
+        for key in all_metric_keys:
+            val1 = metrics1.get(key)
+            val2 = metrics2.get(key)
+            if val1 != val2:
+                comparison["metrics_diff"][key] = {
+                    "checkpoint1": val1,
+                    "checkpoint2": val2,
+                    "change": val2 - val1 if isinstance(val1, (int, float)) and isinstance(val2, (int, float)) else None
+                }
+
+        # Compare dataset stats
+        stats1 = info1.get("dataset_stats", {})
+        stats2 = info2.get("dataset_stats", {})
+        all_stats_keys = set(stats1.keys()) | set(stats2.keys())
+
+        for key in all_stats_keys:
+            val1 = stats1.get(key)
+            val2 = stats2.get(key)
+            if val1 != val2:
+                comparison["dataset_stats_diff"][key] = {
+                    "checkpoint1": val1,
+                    "checkpoint2": val2
+                }
+
+        logger.info(f"Comparison complete: {len(comparison['metrics_diff'])} metric differences found")
+        return comparison
+
+    def export_checkpoint_summary(self, output_path: Optional[str] = None) -> str:
+        """
+        Export a summary of all checkpoints to a report file.
+
+        Args:
+            output_path: Optional path for the report (defaults to checkpoints_summary.json)
+
+        Returns:
+            Path to the generated report
+        """
+        if output_path is None:
+            report_path = self.base_dir / "checkpoints_summary.json"
+        else:
+            report_path = Path(output_path)
+
+        logger.info(f"Exporting checkpoint summary to {report_path}")
+
+        summary = {
+            "generated_at": datetime.now().isoformat(),
+            "base_directory": str(self.base_dir),
+            "current_checkpoint": str(self.current_checkpoint) if self.current_checkpoint else None,
+            "rollback_history": self.rollback_history,
+            "checkpoints_by_stage": {},
+            "total_checkpoints": 0,
+            "total_size_mb": 0
+        }
+
+        # Group checkpoints by stage
+        all_checkpoints = self.list_checkpoints()
+
+        for checkpoint in all_checkpoints:
+            stage = checkpoint.get("stage", "unknown")
+            if stage not in summary["checkpoints_by_stage"]:
+                summary["checkpoints_by_stage"][stage] = []
+
+            summary["checkpoints_by_stage"][stage].append({
+                "version": checkpoint.get("version"),
+                "timestamp": checkpoint.get("timestamp"),
+                "metrics": checkpoint.get("metrics", {}),
+                "size_mb": checkpoint.get("checkpoint_size_mb"),
+                "path": checkpoint.get("path")
+            })
+
+            summary["total_checkpoints"] += 1
+            if checkpoint.get("checkpoint_size_mb"):
+                summary["total_size_mb"] += checkpoint.get("checkpoint_size_mb")
+
+        # Sort checkpoints within each stage
+        for stage in summary["checkpoints_by_stage"]:
+            summary["checkpoints_by_stage"][stage].sort(
+                key=lambda x: x.get("version", 0)
+            )
+
+        # Write summary
+        with open(report_path, "w") as f:
+            json.dump(summary, f, indent=2)
+
+        logger.info(f"Summary exported: {summary['total_checkpoints']} checkpoints, "
+                   f"{summary['total_size_mb']:.2f} MB total")
+        print(f"Checkpoint summary exported to: {report_path}")
+
+        return str(report_path)
+
+    def set_training_start_time(self):
+        """Set the training start time for duration tracking."""
+        self.training_start_time = time.time()
+        logger.debug(f"Training start time set: {datetime.fromtimestamp(self.training_start_time)}")
