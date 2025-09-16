@@ -13,7 +13,8 @@ from datasets import Dataset as HFDataset
 from transformers import (
     TrainingArguments,
     EarlyStoppingCallback,
-    AutoTokenizer
+    AutoTokenizer,
+    TrainerCallback
 )
 from trl import DPOTrainer as TRLDPOTrainer, DPOConfig
 
@@ -26,10 +27,152 @@ from training.metrics_tracker import TrainingMetricsTracker
 from utils.dataset_loader import UnifiedDatasetLoader
 import training_parameters as params
 
+# Import error handling modules
+from utils.error_handler import ErrorHandler
+from utils.training_state import TrainingStateManager, TrainingState
+from utils.batch_size_optimizer import BatchSizeOptimizer, BatchSizeConfig
+from utils.gradient_monitor import GradientMonitor, GradientHealthConfig
+from utils.loss_validator import LossValidator, LossValidationConfig
+from utils.precision_handler import PrecisionHandler, PrecisionConfig
+from datetime import datetime
+import gc
+
 logger = logging.getLogger(__name__)
 
 
 # DPODataset class removed - functionality moved to UnifiedDatasetLoader
+
+
+class DPOErrorHandlingCallback(TrainerCallback):
+    """
+    Custom callback for error handling during DPO training.
+    Monitors loss, gradients, and DPO-specific metrics like reward margins.
+    """
+
+    def __init__(self,
+                 gradient_monitor: Optional[GradientMonitor] = None,
+                 loss_validator: Optional[LossValidator] = None,
+                 reward_validator: Optional[LossValidator] = None,
+                 state_manager: Optional[TrainingStateManager] = None,
+                 model: Optional[torch.nn.Module] = None):
+        """
+        Initialize DPO error handling callback.
+
+        Args:
+            gradient_monitor: Monitor for gradient health
+            loss_validator: Validator for loss values
+            reward_validator: Validator for reward margins (DPO-specific)
+            state_manager: Manager for training state persistence
+            model: Model for gradient checking
+        """
+        self.gradient_monitor = gradient_monitor
+        self.loss_validator = loss_validator
+        self.reward_validator = reward_validator
+        self.state_manager = state_manager
+        self.model = model
+        self.steps_since_save = 0
+        self.reward_margin_history = []
+
+    def on_log(self, args, state, control, logs=None, **kwargs):
+        """Monitor metrics during logging.
+
+        Args:
+            args: Training arguments (unused but required by interface)
+            state: Current training state
+            control: Training control flow
+            logs: Dictionary of logged metrics
+            **kwargs: Additional arguments (unused but required by interface)
+        """
+        if not logs:
+            return control
+
+        # Check standard loss
+        if self.loss_validator and "loss" in logs:
+            loss = logs["loss"]
+            is_valid, action, info = self.loss_validator.validate_loss(
+                torch.tensor(loss), step=state.global_step
+            )
+
+            if not is_valid:
+                logger.warning(f"Loss validation failed at step {state.global_step}: {action}")
+                if action == "skip_update":
+                    control.should_training_stop = False
+                    control.should_log = False
+                elif action == "restore_checkpoint":
+                    control.should_training_stop = True
+                    logger.error("Critical loss issue - stopping training")
+
+        # Check DPO-specific reward margins
+        if self.reward_validator:
+            if "reward_margin" in logs:
+                margin = logs["reward_margin"]
+                self.reward_margin_history.append(margin)
+
+                is_valid, action, info = self.reward_validator.validate_loss(
+                    torch.tensor(margin), step=state.global_step
+                )
+
+                if not is_valid:
+                    logger.warning(f"Reward margin issue at step {state.global_step}: {info}")
+
+                    # Check for reward collapse
+                    if "plateau" in str(info).lower() or margin < 0.01:
+                        logger.error("Reward collapse detected - may need to adjust DPO beta")
+                        control.should_training_stop = True
+
+            # Monitor chosen vs rejected rewards separately
+            if "chosen_reward" in logs and "rejected_reward" in logs:
+                chosen = logs["chosen_reward"]
+                rejected = logs["rejected_reward"]
+
+                # Check for reward inversion (rejected > chosen)
+                if rejected > chosen:
+                    logger.warning(f"Reward inversion at step {state.global_step}: "
+                                   f"rejected ({rejected:.4f}) > chosen ({chosen:.4f})")
+
+        return control
+
+    def on_step_end(self, args, state, control, **kwargs):
+        """Check gradients and save state after each step.
+
+        Args:
+            args: Training arguments (unused but required by interface)
+            state: Current training state
+            control: Training control flow (unused but required by interface)
+            **kwargs: Additional arguments (unused but required by interface)
+        """
+        # Check gradient health
+        if self.gradient_monitor and self.model:
+            is_healthy, stats = self.gradient_monitor.check_gradients(self.model)
+
+            if not is_healthy and stats:
+                issues = stats.get("issues", [])
+                logger.warning(f"Gradient issues at step {state.global_step}: {issues}")
+
+                # Apply gradient clipping if needed
+                if any("explosion" in str(issue).lower() for issue in issues):
+                    self.gradient_monitor.clip_gradients(self.model)
+                    logger.info("Applied adaptive gradient clipping")
+
+        # Save state periodically
+        self.steps_since_save += 1
+        if self.state_manager and self.steps_since_save >= 100:
+            # Create a simple state dictionary for DPO training
+            state_dict = {
+                "step": state.global_step,
+                "epoch": state.epoch,
+                "best_metric": state.best_metric or 0.0,
+                "learning_rate": state.log_history[-1].get("learning_rate", 0) if state.log_history else 0,
+                "loss": state.log_history[-1].get("loss", 0) if state.log_history else 0,
+                "reward_margins": self.reward_margin_history[-10:] if self.reward_margin_history else [],
+                "timestamp": datetime.now().isoformat()
+            }
+            # Save as JSON directly since we're tracking DPO-specific metrics
+            import json
+            state_path = self.state_manager.checkpoint_dir / f"dpo_state_step_{state.global_step}.json"
+            with open(state_path, 'w') as f:
+                json.dump(state_dict, f, indent=2)
+            self.steps_since_save = 0
 
 
 class DPOTrainingModule:
@@ -41,7 +184,8 @@ class DPOTrainingModule:
     def __init__(self,
                  model_name: str = "mistralai/Mistral-7B-v0.1",
                  output_dir: str = "checkpoints/dpo",
-                 reference_model_path: Optional[str] = None):
+                 reference_model_path: Optional[str] = None,
+                 enable_error_handling: bool = True):
         """
         Initialize DPO training module.
 
@@ -49,11 +193,13 @@ class DPOTrainingModule:
             model_name: Base model name or path
             output_dir: Directory for saving checkpoints
             reference_model_path: Path to reference model (if None, uses base model)
+            enable_error_handling: Whether to enable comprehensive error handling
         """
         self.model_name = model_name
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.reference_model_path = reference_model_path or model_name
+        self.enable_error_handling = enable_error_handling
 
         # Initialize components
         self.checkpoint_manager = CheckpointManager(str(self.output_dir))
@@ -65,6 +211,113 @@ class DPOTrainingModule:
         self.best_reward_margin = float('-inf')
         self.patience_counter = 0
         self.early_stopping_patience = 5
+
+        # Initialize error handlers if enabled
+        if self.enable_error_handling:
+            # Central error handler
+            self.error_handler = ErrorHandler()
+
+            # Training state manager for crash recovery
+            self.state_manager = TrainingStateManager(
+                checkpoint_dir=str(self.output_dir / "training_states")
+            )
+
+            # Batch size optimizer for OOM recovery
+            self.batch_optimizer = BatchSizeOptimizer(
+                config=BatchSizeConfig(
+                    initial_batch_size=params.PER_DEVICE_BATCH_SIZE,
+                    min_batch_size=1,
+                    max_batch_size=params.PER_DEVICE_BATCH_SIZE * 2,
+                    gradient_accumulation_steps=params.GRAD_ACCUM_STEPS,
+                    enable_auto_tuning=True,
+                    memory_fraction_target=0.9,
+                    reduction_factor=0.5
+                ),
+                log_dir=str(self.output_dir)
+            )
+
+            # Gradient monitor for health checking
+            self.gradient_monitor = GradientMonitor(
+                config=GradientHealthConfig(
+                    max_gradient_norm=1.0,
+                    explosion_threshold=100.0,
+                    vanishing_threshold=1e-7,
+                    enable_clipping=True,
+                    clip_value=1.0,
+                    adaptive_clipping=True,
+                    log_frequency=params.LOGGING_STEPS
+                )
+            )
+
+            # Loss validator for detecting training issues
+            self.loss_validator = LossValidator(
+                config=LossValidationConfig(
+                    max_loss=100.0,
+                    min_loss=0.0,
+                    nan_action="skip",
+                    inf_action="skip",
+                    stability_window=50,
+                    enable_anomaly_detection=True,
+                    divergence_threshold=1000.0,
+                    divergence_patience=5
+                )
+            )
+
+            # Precision handler for mixed precision training
+            self.precision_handler = PrecisionHandler(
+                config=PrecisionConfig(
+                    use_bf16=params.BF16,
+                    use_fp16=not params.BF16,
+                    use_fp32_fallback=True,
+                    use_amp=True,
+                    use_gradient_scaling=not params.BF16,
+                    auto_detect_hardware=True
+                )
+            )
+
+            logger.info("Error handling initialized with all protection modules")
+
+            # DPO-specific: Initialize reward margin validator
+            self.reward_validator = LossValidator(
+                config=LossValidationConfig(
+                    max_loss=10.0,  # Max acceptable reward margin
+                    min_loss=-10.0,  # Min acceptable reward margin
+                    nan_action="skip",
+                    inf_action="skip",
+                    stability_window=20,
+                    plateau_threshold=0.001,  # Detect reward collapse
+                    plateau_patience=10
+                )
+            )
+
+    def validate_preference_pair(self, chosen: str, rejected: str) -> Tuple[bool, str]:
+        """
+        Validate a DPO preference pair for quality issues.
+
+        Args:
+            chosen: The preferred response
+            rejected: The rejected response
+
+        Returns:
+            Tuple of (is_valid, reason)
+        """
+        # Check for empty or identical pairs
+        if not chosen or not rejected:
+            return False, "Empty response in pair"
+
+        if chosen.strip() == rejected.strip():
+            return False, "Identical chosen and rejected responses"
+
+        # Check for extreme length differences (might indicate data issues)
+        len_ratio = len(chosen) / max(len(rejected), 1)
+        if len_ratio > 10 or len_ratio < 0.1:
+            return False, f"Extreme length ratio: {len_ratio:.2f}"
+
+        # Check for suspicious patterns
+        if chosen.count("[") != chosen.count("]") or rejected.count("[") != rejected.count("]"):
+            return False, "Unmatched brackets (potential truncation)"
+
+        return True, "Valid pair"
 
     def prepare_dataset(self, data_path: str, tokenizer: AutoTokenizer) -> HFDataset:
         """
@@ -260,7 +513,7 @@ class DPOTrainingModule:
             compute_metrics=self.compute_metrics if eval_dataset else None,
         )
 
-        # Add early stopping callback if we have eval data
+        # Add callbacks
         if eval_dataset:
             early_stopping = EarlyStoppingCallback(
                 early_stopping_patience=self.early_stopping_patience,
@@ -268,9 +521,99 @@ class DPOTrainingModule:
             )
             trainer.add_callback(early_stopping)
 
-        # Start training
+        # Add error handling callback if enabled
+        if self.enable_error_handling:
+            error_callback = DPOErrorHandlingCallback(
+                gradient_monitor=self.gradient_monitor,
+                loss_validator=self.loss_validator,
+                reward_validator=self.reward_validator if hasattr(self, 'reward_validator') else None,
+                state_manager=self.state_manager,
+                model=model
+            )
+            trainer.add_callback(error_callback)
+            logger.info("Error handling callback added to trainer")
+
+        # Training context for error handler
+        training_context = {
+            "model": model,
+            "ref_model": ref_model,
+            "tokenizer": tokenizer,
+            "training_args": training_args,
+            "output_dir": str(self.output_dir),
+            "resume_checkpoint": resume_from_checkpoint
+        }
+
+        # Start training with error handling
         logger.info("Starting DPO training loop...")
-        train_result = trainer.train(resume_from_checkpoint=resume_from_checkpoint)
+
+        if self.enable_error_handling:
+            # Handle dual model memory for DPO
+            if torch.cuda.is_available():
+                # Clear cache before training
+                torch.cuda.empty_cache()
+                gc.collect()
+
+                # Log memory usage for both models
+                allocated = torch.cuda.memory_allocated() / (1024**3)
+                reserved = torch.cuda.memory_reserved() / (1024**3)
+                logger.info(f"GPU memory before training: allocated={allocated:.2f}GB, reserved={reserved:.2f}GB")
+
+            # Wrap training with precision handling and error recovery
+            with self.precision_handler.autocast_context():
+                train_result = self.error_handler.safe_execute(
+                    trainer.train,
+                    context=training_context,
+                    resume_from_checkpoint=resume_from_checkpoint
+                )
+
+            # Handle OOM errors with batch size reduction
+            if train_result is None:
+                logger.warning("Training failed, attempting recovery with reduced batch size")
+
+                # Get new batch size from optimizer
+                new_batch_size, new_grad_accum = self.batch_optimizer.reduce_batch_size_on_oom()
+
+                # Update training args
+                training_args.per_device_train_batch_size = new_batch_size
+                training_args.gradient_accumulation_steps = new_grad_accum
+
+                logger.info(f"Retrying with batch_size={new_batch_size}, grad_accum={new_grad_accum}")
+
+                # Recreate trainer with new batch size
+                trainer = TRLDPOTrainer(
+                    model=model,
+                    ref_model=ref_model,
+                    args=training_args,
+                    train_dataset=train_dataset,
+                    eval_dataset=eval_dataset,
+                    tokenizer=tokenizer,
+                    compute_metrics=self.compute_metrics if eval_dataset else None,
+                )
+
+                # Re-add error callback
+                error_callback = DPOErrorHandlingCallback(
+                    gradient_monitor=self.gradient_monitor,
+                    loss_validator=self.loss_validator,
+                    reward_validator=self.reward_validator if hasattr(self, 'reward_validator') else None,
+                    state_manager=self.state_manager,
+                    model=model
+                )
+                trainer.add_callback(error_callback)
+
+                # Re-add early stopping if we have eval data
+                if eval_dataset:
+                    early_stopping_retry = EarlyStoppingCallback(
+                        early_stopping_patience=self.early_stopping_patience,
+                        early_stopping_threshold=0.001
+                    )
+                    trainer.add_callback(early_stopping_retry)
+
+                # Retry training
+                with self.precision_handler.autocast_context():
+                    train_result = trainer.train(resume_from_checkpoint=resume_from_checkpoint)
+        else:
+            # Standard training without error handling
+            train_result = trainer.train(resume_from_checkpoint=resume_from_checkpoint)
 
         # Save final model
         logger.info("Saving final model...")

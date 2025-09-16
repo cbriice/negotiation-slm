@@ -5,3 +5,5 @@ __pycache__/
 .env*
 .venv310/
 data/
+training_states/
+logs/errors/

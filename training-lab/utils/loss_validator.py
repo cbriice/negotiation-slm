@@ -134,15 +134,15 @@ class LossValidator:
         if is_anomaly:
             return self._handle_anomaly(loss_value, anomaly_info)
 
+        # Check for divergence FIRST (more critical than stability)
+        is_diverging, divergence_info = self._check_divergence()
+        if is_diverging:
+            return self._handle_divergence(divergence_info)
+
         # Check stability
         is_stable, stability_info = self._check_stability()
         if not is_stable:
             return self._handle_instability(stability_info)
-
-        # Check for divergence
-        is_diverging, divergence_info = self._check_divergence()
-        if is_diverging:
-            return self._handle_divergence(divergence_info)
 
         # Check for plateau
         is_plateaued, plateau_info = self._check_plateau()
@@ -397,22 +397,70 @@ class LossValidator:
 
     def _check_divergence(self) -> Tuple[bool, Dict[str, Any]]:
         """Check if loss is diverging."""
-        if len(self.loss_history) < 10:
+        if len(self.loss_history) < 5:  # Need some history
             return False, {}
 
         stats = self.current_stats
         if not stats:
             return False, {}
 
-        # Check if loss is consistently increasing
-        if stats.trend > 0.1 and stats.current > self.config.divergence_threshold:
+        # Get recent losses for analysis
+        recent_losses = list(self.loss_history)[-10:] if len(self.loss_history) >= 10 else list(self.loss_history)
+
+        # 1. Check for consecutive increases
+        consecutive_increases = 0
+        max_consecutive = 0
+        for i in range(1, len(recent_losses)):
+            if recent_losses[i] > recent_losses[i-1] * 1.1:  # 10% increase
+                consecutive_increases += 1
+                max_consecutive = max(max_consecutive, consecutive_increases)
+            else:
+                consecutive_increases = 0
+
+        # 2. Check relative increase from recent average
+        if len(recent_losses) > 1:
+            recent_mean = np.mean(recent_losses[:-1])
+            relative_increase = stats.current / (recent_mean + 1e-8)
+        else:
+            relative_increase = 1.0
+
+        # 3. Check if above absolute threshold
+        above_threshold = stats.current > self.config.divergence_threshold
+
+        # Log debug info
+        if self.step_count % 5 == 0 or above_threshold:  # Log every 5 steps or when above threshold
+            self.logger.debug(
+                f"Divergence check step {self.step_count}: loss={stats.current:.2f}, "
+                f"trend={stats.trend:.4f}, consecutive={max_consecutive}, "
+                f"relative_increase={relative_increase:.2f}, above_threshold={above_threshold}"
+            )
+
+        # Divergence conditions:
+        # - 5+ consecutive increasing steps with 10% jumps
+        # - Current is 5x recent average AND above threshold
+        # - Strong positive trend (>0.5) AND above threshold
+        is_diverging = (
+            max_consecutive >= 5 or
+            (relative_increase > 5 and above_threshold) or
+            (stats.trend > 0.5 and above_threshold)
+        )
+
+        if is_diverging:
             self.divergence_count += 1
+            self.logger.info(
+                f"Divergence detected! Count: {self.divergence_count}/{self.config.divergence_patience}"
+            )
             if self.divergence_count >= self.config.divergence_patience:
                 return True, {
                     "trend": stats.trend,
                     "current_loss": stats.current,
+                    "relative_increase": relative_increase,
+                    "consecutive_increases": max_consecutive,
                     "count": self.divergence_count
                 }
+        else:
+            # Reset count if not diverging
+            self.divergence_count = max(0, self.divergence_count - 1)
 
         return False, {}
 

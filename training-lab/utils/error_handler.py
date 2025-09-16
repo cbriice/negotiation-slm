@@ -61,6 +61,9 @@ class ErrorHandler:
         # Track recovery attempts
         self.recovery_attempts: Dict[str, int] = {}
 
+        # Track error counts by type
+        self.error_counts: Dict[str, int] = {}
+
         # Setup logging
         self.logger = self._setup_logger()
 
@@ -355,6 +358,12 @@ class ErrorHandler:
         except Exception as e:
             self.logger.error(f"Error in {func.__name__}: {e}")
             self.logger.debug(traceback.format_exc())
+
+            # Track error counts by exception type
+            error_type_name = type(e).__name__
+            if error_type_name not in self.error_counts:
+                self.error_counts[error_type_name] = 0
+            self.error_counts[error_type_name] += 1
 
             # Increment recovery attempts
             self.recovery_attempts[error_key] += 1
