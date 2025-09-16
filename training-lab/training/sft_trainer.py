@@ -35,6 +35,7 @@ from utils.batch_size_optimizer import BatchSizeOptimizer, BatchSizeConfig
 from utils.gradient_monitor import GradientMonitor, GradientHealthConfig
 from utils.loss_validator import LossValidator, LossValidationConfig
 from utils.precision_handler import PrecisionHandler, PrecisionConfig
+from utils.tensorboard_writer import TensorBoardWriter
 
 # Configure logging
 Path("logs").mkdir(exist_ok=True)
@@ -140,8 +141,9 @@ class SFTTrainingPipeline:
         self.model = None
         self.tokenizer = None
 
-        # Initialize metrics tracker
+        # Initialize metrics tracker and TensorBoard writer
         self.metrics_tracker = None
+        self.tb_writer = None
 
     def load_ndjson_dataset(self, file_path: str) -> Dataset:
         """
@@ -268,6 +270,13 @@ class SFTTrainingPipeline:
             stage="sft"
         )
 
+        # Initialize TensorBoard writer
+        self.tb_writer = TensorBoardWriter(
+            log_dir=str(output_dir.parent / "runs"),
+            experiment_name=f"sft{output_suffix}",
+            comment=f"lr_{params.SFT_LR}_bs_{params.PER_DEVICE_BATCH_SIZE}"
+        )
+
         # Setup training arguments using SFTConfig for compatibility
         training_args = SFTConfig(
             output_dir=str(output_dir),
@@ -347,6 +356,48 @@ class SFTTrainingPipeline:
                             epoch=state.epoch or 0,
                             metrics=logs
                         )
+
+                    # Log to TensorBoard
+                    if self.parent.tb_writer:
+                        # Log loss
+                        if "loss" in logs:
+                            self.parent.tb_writer.log_loss_metrics(
+                                loss=logs['loss'],
+                                step=step,
+                                loss_type="train"
+                            )
+
+                        # Log eval loss if present
+                        if "eval_loss" in logs:
+                            self.parent.tb_writer.log_loss_metrics(
+                                loss=logs['eval_loss'],
+                                step=step,
+                                loss_type="eval"
+                            )
+
+                        # Log learning rate
+                        if "learning_rate" in logs:
+                            self.parent.tb_writer.log_learning_rate(
+                                logs['learning_rate'],
+                                step
+                            )
+
+                        # Log performance metrics
+                        if "train_samples_per_second" in logs:
+                            self.parent.tb_writer.log_performance_metrics(
+                                samples_per_second=logs.get("train_samples_per_second"),
+                                step=step
+                            )
+
+                        # Log all error handlers
+                        self.parent.tb_writer.log_all_error_handlers(
+                            batch_optimizer=self.parent.batch_optimizer,
+                            gradient_monitor=self.parent.gradient_monitor,
+                            loss_validator=self.parent.loss_validator,
+                            precision_handler=self.parent.precision_handler,
+                            step=step
+                        )
+
                     # Log key metrics to logger
                     if "loss" in logs:
                         logger.info(f"Step {step}: loss={logs['loss']:.4f}")
@@ -365,6 +416,15 @@ class SFTTrainingPipeline:
                                 elif action == "restore_checkpoint":
                                     control.should_training_stop = True
                                     logger.error("Loss diverged - stopping training for checkpoint restore")
+
+                                # Log error to TensorBoard
+                                if self.parent.tb_writer:
+                                    self.parent.tb_writer.log_error_event(
+                                        error_type="loss_validation",
+                                        error_message=str(info),
+                                        step=step,
+                                        severity="error" if action == "restore_checkpoint" else "warning"
+                                    )
 
             def on_step_end(self, args, state, control, **kwargs):
                 """Check gradients after each training step."""
@@ -509,6 +569,29 @@ class SFTTrainingPipeline:
         logger.info(f"Total time: {training_time/60:.1f} minutes")
         logger.info(f"Training speed: {metrics['train_samples_per_second']:.2f} samples/sec")
         logger.info(f"Model saved to: {output_dir / 'final_model'}")
+
+        # Log final hyperparameters and metrics to TensorBoard
+        if self.tb_writer:
+            hparams = {
+                "learning_rate": params.SFT_LR,
+                "batch_size": params.PER_DEVICE_BATCH_SIZE,
+                "grad_accum_steps": params.GRAD_ACCUM_STEPS,
+                "max_seq_len": params.MAX_SEQ_LEN,
+                "lora_rank": params.R,
+                "lora_alpha": params.ALPHA,
+                "lora_dropout": params.DROPOUT,
+                "optimizer": params.OPTIM,
+                "scheduler": params.SFT_LR_SCHEDULER,
+                "warmup_ratio": params.SFT_WARMUP_RATIO,
+            }
+            final_metrics = {
+                "final_loss": metrics['train_loss'],
+                "total_steps": metrics['total_steps'],
+                "train_runtime": metrics['train_runtime'],
+                "samples_per_second": metrics['train_samples_per_second'],
+            }
+            self.tb_writer.log_hyperparameters(hparams, final_metrics)
+            self.tb_writer.close()
 
         return metrics
 

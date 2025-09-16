@@ -12,3 +12,4 @@ parlai
 safetensors
 triton
 GPUtil
+tensorflow

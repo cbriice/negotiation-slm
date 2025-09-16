@@ -23,6 +23,7 @@ from .metrics_tracker import TrainingMetricsTracker
 
 # Import unified dataset loader
 from utils.dataset_loader import UnifiedDatasetLoader
+from utils.tensorboard_writer import TensorBoardWriter
 
 import training_parameters as params
 
@@ -72,6 +73,9 @@ class QLoRATrainer:
         # Training state
         self.current_stage = None
         self.current_version = 1
+
+        # TensorBoard writer (shared across trainers)
+        self.tb_writer = None
 
     @property
     def sft_trainer(self) -> SFTTrainingPipeline:
@@ -180,6 +184,16 @@ class QLoRATrainer:
                 self.sft_trainer.model = self.model
                 self.sft_trainer.tokenizer = self.tokenizer
 
+            # Initialize TensorBoard if not already done
+            if self.tb_writer is None:
+                self.tb_writer = TensorBoardWriter(
+                    log_dir=str(self.output_dir / "runs"),
+                    experiment_name=f"qlora_v{self.current_version}",
+                    comment=self.current_stage or "training"
+                )
+                # Share with SFT trainer
+                self.sft_trainer.tb_writer = self.tb_writer
+
             # Run training
             metrics = self.sft_trainer.train(
                 train_dataset=train_dataset,
@@ -234,6 +248,18 @@ class QLoRATrainer:
 
             # Update reference model path
             self.dpo_trainer.reference_model_path = reference_model_path
+
+            # Share TensorBoard writer if available
+            if self.tb_writer:
+                self.dpo_trainer.tb_writer = self.tb_writer
+            else:
+                # Initialize if needed
+                self.tb_writer = TensorBoardWriter(
+                    log_dir=str(self.output_dir / "runs"),
+                    experiment_name=f"qlora_v{self.current_version}",
+                    comment="dpo"
+                )
+                self.dpo_trainer.tb_writer = self.tb_writer
 
             # Convert string paths to actual paths for the trainer
             if isinstance(train_data, str):
@@ -421,6 +447,11 @@ class QLoRATrainer:
         if self._dpo_trainer is not None:
             del self._dpo_trainer
             self._dpo_trainer = None
+
+        # Close TensorBoard writer
+        if self.tb_writer is not None:
+            self.tb_writer.close()
+            self.tb_writer = None
 
         # Force garbage collection
         if torch.cuda.is_available():

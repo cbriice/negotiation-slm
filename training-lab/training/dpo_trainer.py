@@ -34,6 +34,7 @@ from utils.batch_size_optimizer import BatchSizeOptimizer, BatchSizeConfig
 from utils.gradient_monitor import GradientMonitor, GradientHealthConfig
 from utils.loss_validator import LossValidator, LossValidationConfig
 from utils.precision_handler import PrecisionHandler, PrecisionConfig
+from utils.tensorboard_writer import TensorBoardWriter
 from datetime import datetime
 import gc
 
@@ -73,6 +74,17 @@ class DPOErrorHandlingCallback(TrainerCallback):
         self.steps_since_save = 0
         self.reward_margin_history = []
 
+    def __init__(self,
+                 gradient_monitor: Optional[GradientMonitor] = None,
+                 loss_validator: Optional[LossValidator] = None,
+                 reward_validator: Optional[LossValidator] = None,
+                 state_manager: Optional[TrainingStateManager] = None,
+                 model: Optional[torch.nn.Module] = None,
+                 tb_writer: Optional[TensorBoardWriter] = None):
+        """Initialize with TensorBoard writer."""
+        super().__init__(gradient_monitor, loss_validator, reward_validator, state_manager, model)
+        self.tb_writer = tb_writer
+
     def on_log(self, args, state, control, logs=None, **kwargs):
         """Monitor metrics during logging.
 
@@ -85,6 +97,42 @@ class DPOErrorHandlingCallback(TrainerCallback):
         """
         if not logs:
             return control
+
+        step = state.global_step
+
+        # Log to TensorBoard if available
+        if self.tb_writer and logs:
+            # Log DPO specific metrics
+            if "reward_margin" in logs:
+                self.tb_writer.log_dpo_metrics(
+                    chosen_rewards=logs.get("chosen_reward", 0),
+                    rejected_rewards=logs.get("rejected_reward", 0),
+                    reward_margin=logs["reward_margin"],
+                    step=step
+                )
+
+            # Log loss
+            if "loss" in logs:
+                self.tb_writer.log_loss_metrics(
+                    loss=logs["loss"],
+                    step=step,
+                    loss_type="train"
+                )
+
+            # Log eval loss
+            if "eval_loss" in logs:
+                self.tb_writer.log_loss_metrics(
+                    loss=logs["eval_loss"],
+                    step=step,
+                    loss_type="eval"
+                )
+
+            # Log learning rate
+            if "learning_rate" in logs:
+                self.tb_writer.log_learning_rate(
+                    logs["learning_rate"],
+                    step
+                )
 
         # Check standard loss
         if self.loss_validator and "loss" in logs:
@@ -141,6 +189,16 @@ class DPOErrorHandlingCallback(TrainerCallback):
             control: Training control flow (unused but required by interface)
             **kwargs: Additional arguments (unused but required by interface)
         """
+        # Log error handler metrics to TensorBoard
+        if self.tb_writer:
+            self.tb_writer.log_all_error_handlers(
+                batch_optimizer=None,  # Not available in this context
+                gradient_monitor=self.gradient_monitor,
+                loss_validator=self.loss_validator,
+                precision_handler=None,  # Not available in this context
+                step=state.global_step
+            )
+
         # Check gradient health
         if self.gradient_monitor and self.model:
             is_healthy, stats = self.gradient_monitor.check_gradients(self.model)
@@ -153,6 +211,16 @@ class DPOErrorHandlingCallback(TrainerCallback):
                 if any("explosion" in str(issue).lower() for issue in issues):
                     self.gradient_monitor.clip_gradients(self.model)
                     logger.info("Applied adaptive gradient clipping")
+
+                # Log issues to TensorBoard
+                if self.tb_writer:
+                    for issue in issues:
+                        self.tb_writer.log_error_event(
+                            error_type="gradient_issue",
+                            error_message=issue,
+                            step=state.global_step,
+                            severity="warning"
+                        )
 
         # Save state periodically
         self.steps_since_save += 1
@@ -205,6 +273,7 @@ class DPOTrainingModule:
         self.checkpoint_manager = CheckpointManager(str(self.output_dir))
         self.metrics_tracker = TrainingMetricsTracker(log_dir=str(self.output_dir / "metrics"), stage="dpo")
         self.dataset_loader = UnifiedDatasetLoader()
+        self.tb_writer = None  # Initialize during training
 
         # Track training state
         self.reward_margins = []
@@ -480,6 +549,14 @@ class DPOTrainingModule:
         logger.info(f"Reference model: {self.reference_model_path}")
         logger.info(f"Training data: {train_data_path}")
 
+        # Initialize TensorBoard writer
+        run_name = f"dpo_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        self.tb_writer = TensorBoardWriter(
+            log_dir=str(self.output_dir.parent / "runs"),
+            experiment_name=run_name,
+            comment=f"beta_{params.DPO_BETA}_lr_{params.DPO_LR}"
+        )
+
         # Load model and tokenizer
         logger.info("Loading model with QLoRA...")
         model, tokenizer = ModelLoader.load_model(self.model_name)
@@ -528,7 +605,8 @@ class DPOTrainingModule:
                 loss_validator=self.loss_validator,
                 reward_validator=self.reward_validator if hasattr(self, 'reward_validator') else None,
                 state_manager=self.state_manager,
-                model=model
+                model=model,
+                tb_writer=self.tb_writer
             )
             trainer.add_callback(error_callback)
             logger.info("Error handling callback added to trainer")
@@ -596,7 +674,8 @@ class DPOTrainingModule:
                     loss_validator=self.loss_validator,
                     reward_validator=self.reward_validator if hasattr(self, 'reward_validator') else None,
                     state_manager=self.state_manager,
-                    model=model
+                    model=model,
+                    tb_writer=self.tb_writer
                 )
                 trainer.add_callback(error_callback)
 
@@ -642,6 +721,26 @@ class DPOTrainingModule:
         logger.info(f"Total steps: {metrics['total_steps']}")
         logger.info(f"Model saved to: {self.output_dir / 'final_model'}")
         logger.info("=" * 50)
+
+        # Log final hyperparameters and metrics to TensorBoard
+        if self.tb_writer:
+            hparams = {
+                "beta": params.DPO_BETA,
+                "learning_rate": params.DPO_LR,
+                "batch_size": params.PER_DEVICE_BATCH_SIZE,
+                "grad_accum_steps": params.GRAD_ACCUM_STEPS,
+                "max_prompt_length": params.DPO_MAX_PROMPT_LEN,
+                "label_smoothing": params.DPO_LABEL_SMOOTH,
+                "lora_rank": params.R,
+                "lora_alpha": params.ALPHA,
+            }
+            final_metrics = {
+                "final_loss": metrics["train_loss"],
+                "best_reward_margin": metrics["best_reward_margin"],
+                "total_steps": metrics["total_steps"],
+            }
+            self.tb_writer.log_hyperparameters(hparams, final_metrics)
+            self.tb_writer.close()
 
         return metrics
 
