@@ -10,6 +10,7 @@ import sys
 import time
 from pathlib import Path
 from typing import Dict, List, Optional, Any
+from datetime import datetime
 import torch
 from datasets import Dataset
 from transformers import (
@@ -17,7 +18,7 @@ from transformers import (
     DataCollatorForLanguageModeling,
     TrainerCallback,
 )
-from trl import SFTTrainer
+from trl import SFTTrainer, SFTConfig
 
 # Import existing QLoRA components
 from .model_loader import ModelLoader
@@ -26,6 +27,14 @@ from .checkpoint_manager import CheckpointManager
 from .metrics_tracker import TrainingMetricsTracker
 from utils.dataset_loader import UnifiedDatasetLoader
 import training_parameters as params
+
+# Import error handling modules
+from utils.error_handler import ErrorHandler
+from utils.training_state import TrainingStateManager, TrainingState
+from utils.batch_size_optimizer import BatchSizeOptimizer, BatchSizeConfig
+from utils.gradient_monitor import GradientMonitor, GradientHealthConfig
+from utils.loss_validator import LossValidator, LossValidationConfig
+from utils.precision_handler import PrecisionHandler, PrecisionConfig
 
 # Configure logging
 Path("logs").mkdir(exist_ok=True)
@@ -46,24 +55,86 @@ class SFTTrainingPipeline:
         self,
         model_name: str = "mistralai/Mistral-7B-v0.1",
         output_dir: str = "models/sft",
-        checkpoint_dir: str = "checkpoints/sft"
+        checkpoint_dir: str = "checkpoints/sft",
+        enable_error_handling: bool = True
     ):
         self.model_name = model_name
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.checkpoint_dir = Path(checkpoint_dir)
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
+        self.enable_error_handling = enable_error_handling
 
         logger.info(f"Initializing SFTTrainingPipeline")
         logger.info(f"  Model: {model_name}")
         logger.info(f"  Output dir: {self.output_dir}")
         logger.info(f"  Checkpoint dir: {self.checkpoint_dir}")
+        logger.info(f"  Error handling: {enable_error_handling}")
 
         # Initialize components
         self.model_loader = ModelLoader()
         self.lora_configurator = LoRAConfigurator()
         self.checkpoint_manager = CheckpointManager(base_dir=self.checkpoint_dir)
         self.dataset_loader = UnifiedDatasetLoader()
+
+        # Initialize error handling modules if enabled
+        if self.enable_error_handling:
+            self.error_handler = ErrorHandler(
+                log_dir=str(self.output_dir / "error_logs"),
+                enable_auto_recovery=True,
+                max_recovery_attempts=3
+            )
+            self.state_manager = TrainingStateManager(
+                checkpoint_dir=str(self.checkpoint_dir),
+                state_dir=str(self.output_dir / "training_states"),
+                auto_save_interval=100  # Save every 100 steps
+            )
+            self.batch_optimizer = BatchSizeOptimizer(
+                config=BatchSizeConfig(
+                    initial_batch_size=params.PER_DEVICE_BATCH_SIZE,
+                    min_batch_size=1,
+                    max_batch_size=32,
+                    gradient_accumulation_steps=params.GRAD_ACCUM_STEPS,
+                    memory_fraction_target=0.85,  # Target 85% GPU memory usage
+                    enable_auto_tuning=True
+                )
+            )
+            self.gradient_monitor = GradientMonitor(
+                config=GradientHealthConfig(
+                    max_gradient_norm=10.0,
+                    explosion_threshold=100.0,
+                    vanishing_threshold=1e-7,
+                    enable_clipping=True,
+                    adaptive_clipping=True
+                )
+            )
+            self.loss_validator = LossValidator(
+                config=LossValidationConfig(
+                    max_loss=100.0,
+                    min_loss=0.0,
+                    nan_action="skip",
+                    inf_action="skip",
+                    plateau_patience=100,
+                    enable_anomaly_detection=True
+                )
+            )
+            self.precision_handler = PrecisionHandler(
+                config=PrecisionConfig(
+                    use_bf16=params.BF16,
+                    use_fp16=not params.BF16,
+                    use_gradient_scaling=not params.BF16,  # Use gradient scaling for fp16
+                    use_amp=True,
+                    overflow_fallback="reduce_scale"
+                )
+            )
+            logger.info("Error handling modules initialized")
+        else:
+            self.error_handler = None
+            self.state_manager = None
+            self.batch_optimizer = None
+            self.gradient_monitor = None
+            self.loss_validator = None
+            self.precision_handler = None
 
         # Model and tokenizer (initialized during setup)
         self.model = None
@@ -138,7 +209,7 @@ class SFTTrainingPipeline:
 
         if resume_from:
             logger.info(f"Loading checkpoint from: {resume_from}")
-            from peft import PeftModel
+            from peft.peft_model import PeftModel
             self.model = PeftModel.from_pretrained(self.model, resume_from)
             logger.info("Checkpoint loaded successfully")
         else:
@@ -197,8 +268,8 @@ class SFTTrainingPipeline:
             stage="sft"
         )
 
-        # Setup training arguments
-        training_args = TrainingArguments(
+        # Setup training arguments using SFTConfig for compatibility
+        training_args = SFTConfig(
             output_dir=str(output_dir),
             num_train_epochs=num_epochs if num_epochs else params.SFT_MAX_STEPS / len(train_dataset),
             max_steps=max_steps if max_steps else params.SFT_MAX_STEPS,
@@ -222,6 +293,10 @@ class SFTTrainingPipeline:
             remove_unused_columns=False,
             report_to=["tensorboard"],
             logging_dir=str(output_dir / "logs"),
+            # SFT specific configs
+            max_seq_length=params.MAX_SEQ_LEN,
+            packing=params.PACKING,
+            dataset_text_field="text",
         )
 
         # Initialize SFTTrainer
@@ -231,9 +306,7 @@ class SFTTrainingPipeline:
             train_dataset=train_dataset,
             eval_dataset=eval_dataset,
             args=training_args,
-            dataset_text_field="text",  # Use preprocessed text field
-            max_seq_length=params.MAX_SEQ_LEN,
-            packing=params.PACKING,
+            # Note: dataset_text_field, max_seq_length, and packing are now in SFTConfig
             data_collator=DataCollatorForLanguageModeling(
                 tokenizer=self.tokenizer,
                 mlm=False,
@@ -256,10 +329,13 @@ class SFTTrainingPipeline:
         logger.info(f"  - Mixed precision: bf16={params.BF16}, fp16={not params.BF16}")
         logger.info(f"  - Gradient checkpointing: {params.GRADIENT_CHECKPOINTING}")
 
-        # Add callback for logging
-        class LoggingCallback(TrainerCallback):
-            def __init__(self, metrics_tracker):
+        # Add callback for logging and error handling
+        class ErrorHandlingCallback(TrainerCallback):
+            def __init__(self, metrics_tracker, error_handling_enabled, parent):
                 self.metrics_tracker = metrics_tracker
+                self.error_handling_enabled = error_handling_enabled
+                self.parent = parent  # Reference to SFTTrainingPipeline
+                self.last_loss = None
 
             def on_log(self, args, state, control, logs=None, **kwargs):
                 if logs:
@@ -274,14 +350,133 @@ class SFTTrainingPipeline:
                     # Log key metrics to logger
                     if "loss" in logs:
                         logger.info(f"Step {step}: loss={logs['loss']:.4f}")
+                        self.last_loss = logs['loss']
 
-        trainer.add_callback(LoggingCallback(self.metrics_tracker))
+                        # Validate loss if error handling is enabled
+                        if self.error_handling_enabled and self.parent.loss_validator:
+                            is_valid, action, info = self.parent.loss_validator.validate_loss(
+                                logs['loss'], step
+                            )
+                            if not is_valid:
+                                logger.warning(f"Loss validation failed at step {step}: {info}")
+                                if action == "skip_update":
+                                    control.should_training_stop = False
+                                    control.should_save = False
+                                elif action == "restore_checkpoint":
+                                    control.should_training_stop = True
+                                    logger.error("Loss diverged - stopping training for checkpoint restore")
 
-        # Train
-        logger.info("Starting training...")
-        start_time = time.time()
-        train_result = trainer.train()
-        training_time = time.time() - start_time
+            def on_step_end(self, args, state, control, **kwargs):
+                """Check gradients after each training step."""
+                if self.error_handling_enabled and self.parent.gradient_monitor:
+                    model = kwargs.get('model', self.parent.model)
+                    if model:
+                        is_healthy, stats = self.parent.gradient_monitor.check_gradients(model)
+                        if not is_healthy:
+                            logger.warning(f"Unhealthy gradients detected at step {state.global_step}")
+                            # Apply adaptive gradient clipping
+                            self.parent.gradient_monitor.clip_gradients(model)
+
+                # Save state periodically for recovery
+                if self.error_handling_enabled and self.parent.state_manager:
+                    if state.global_step % self.parent.state_manager.auto_save_interval == 0:
+                        training_state = TrainingState(
+                            stage="sft",
+                            epoch=state.epoch or 0.0,
+                            global_step=state.global_step,
+                            best_metric=self.last_loss or 0.0,
+                            best_metric_name="loss",
+                            total_epochs=args.num_train_epochs,
+                            total_steps=args.max_steps or 0,
+                            samples_seen=state.global_step * args.per_device_train_batch_size,
+                            tokens_processed=0,  # Would need to track this
+                            model_name=self.parent.model_name,
+                            checkpoint_path=str(output_dir / f"checkpoint-{state.global_step}"),
+                            adapter_config={},
+                            learning_rate=args.learning_rate,
+                            optimizer_state_dict=None,  # Too large to save every time
+                            scheduler_state_dict=None,
+                            dataset_path="",  # Would need to be passed in
+                            dataset_index=0,
+                            batch_size=args.per_device_train_batch_size,
+                            gradient_accumulation_steps=args.gradient_accumulation_steps,
+                            train_loss=self.last_loss or 0.0,
+                            eval_loss=None,
+                            metrics_history={},
+                            timestamp=datetime.now().isoformat(),
+                            recovery_count=0,
+                            last_error=None,
+                            cuda_memory_allocated=torch.cuda.memory_allocated() if torch.cuda.is_available() else None,
+                            cuda_memory_reserved=torch.cuda.memory_reserved() if torch.cuda.is_available() else None
+                        )
+                        self.parent.state_manager.save_state(training_state)
+
+        trainer.add_callback(ErrorHandlingCallback(
+            self.metrics_tracker,
+            self.enable_error_handling,
+            self
+        ))
+
+        # Wrap training with error handler if enabled
+        if self.enable_error_handling and self.error_handler:
+            logger.info("Starting training with error handling enabled...")
+            start_time = time.time()
+
+            # Create training context for error recovery
+            training_context = {
+                "batch_size": training_args.per_device_train_batch_size,
+                "gradient_accumulation": training_args.gradient_accumulation_steps,
+                "max_seq_length": params.MAX_SEQ_LEN,
+                "gradient_checkpointing": params.GRADIENT_CHECKPOINTING,
+                "stage": "sft"
+            }
+
+            # Use precision handler context if available
+            if self.precision_handler:
+                with self.precision_handler.autocast_context():
+                    train_result = self.error_handler.safe_execute(
+                        trainer.train,
+                        context=training_context
+                    )
+            else:
+                train_result = self.error_handler.safe_execute(
+                    trainer.train,
+                    context=training_context
+                )
+
+            # Handle OOM or other errors
+            if train_result is None:
+                logger.error("Training failed after maximum recovery attempts")
+                # Try to recover with reduced batch size
+                if self.batch_optimizer:
+                    new_batch_size, new_grad_accum = self.batch_optimizer.reduce_batch_size_on_oom()
+                    logger.info(f"Retrying with batch_size={new_batch_size}, grad_accum={new_grad_accum}")
+                    training_args.per_device_train_batch_size = new_batch_size
+                    training_args.gradient_accumulation_steps = new_grad_accum
+                    # Recreate trainer with new batch size
+                    trainer = SFTTrainer(
+                        model=self.model,
+                        tokenizer=self.tokenizer,
+                        train_dataset=train_dataset,
+                        eval_dataset=eval_dataset,
+                        args=training_args,
+                        data_collator=DataCollatorForLanguageModeling(
+                            tokenizer=self.tokenizer,
+                            mlm=False,
+                            pad_to_multiple_of=8,
+                        ),
+                    )
+                    train_result = trainer.train()
+                else:
+                    raise RuntimeError("Training failed and recovery was not possible")
+
+            training_time = time.time() - start_time
+        else:
+            # Train without error handling
+            logger.info("Starting training...")
+            start_time = time.time()
+            train_result = trainer.train()
+            training_time = time.time() - start_time
 
         # Save final model
         logger.info("Saving final model...")
