@@ -8,3 +8,4 @@ data/
 training_states/
 logs/errors/
 runs/
+.pytest_cache/
