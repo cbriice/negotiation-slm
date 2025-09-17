@@ -28,6 +28,7 @@ FP16 = False
 TF32 = True                         # matmul allow tf32
 ATTN_IMPLEMENTATION = "flash_attention_2"
 USE_GRADIENT_CHECKPOINTING = "mlp_only"
+USE_FLASH_ATTENTION_2 = True       # Enable Flash Attention 2 by default
 
 # LoRA
 R: int = 96

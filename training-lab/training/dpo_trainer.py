@@ -557,13 +557,19 @@ class DPOTrainingModule:
             comment=f"beta_{params.DPO_BETA}_lr_{params.DPO_LR}"
         )
 
-        # Load model and tokenizer
-        logger.info("Loading model with QLoRA...")
-        model, tokenizer = ModelLoader.load_model(self.model_name)
+        # Load model and tokenizer with Flash Attention 2
+        logger.info("Loading model with QLoRA and Flash Attention 2...")
+        model, tokenizer = ModelLoader.load_model(
+            self.model_name,
+            use_flash_attention_2=params.USE_FLASH_ATTENTION_2
+        )
 
-        # Load reference model (frozen in 4-bit)
-        logger.info("Loading reference model...")
-        ref_model = ModelLoader.load_reference_model(self.reference_model_path)
+        # Load reference model (frozen in 4-bit) with Flash Attention 2
+        logger.info("Loading reference model with Flash Attention 2...")
+        ref_model = ModelLoader.load_reference_model(
+            self.reference_model_path,
+            use_flash_attention_2=params.USE_FLASH_ATTENTION_2
+        )
 
         # Apply LoRA configuration
         lora_config = LoRAConfigurator.get_lora_config()

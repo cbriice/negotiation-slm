@@ -13,3 +13,4 @@ safetensors
 triton
 GPUtil
 tensorflow
+ninja

@@ -1,12 +1,11 @@
 """Model loading and quantization utilities for QLoRA training."""
 
-import torch
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
     BitsAndBytesConfig
 )
-from peft import prepare_model_for_kbit_training
+from peft.utils.other import prepare_model_for_kbit_training
 import training_parameters as params
 
 
@@ -24,14 +23,15 @@ class ModelLoader:
         )
     
     @staticmethod
-    def load_model(model_name: str, device_map: str = None):
+    def load_model(model_name: str, device_map: str | None = None, use_flash_attention_2: bool = True):
         """
-        Load model with 4-bit quantization.
-        
+        Load model with 4-bit quantization and Flash Attention 2.
+
         Args:
             model_name: HuggingFace model name or local path
             device_map: Device mapping strategy (defaults to params.DEVICE_MAP)
-            
+            use_flash_attention_2: Whether to use Flash Attention 2 (default: True)
+
         Returns:
             Tuple of (model, tokenizer)
         """
@@ -40,13 +40,21 @@ class ModelLoader:
         # Load tokenizer
         tokenizer = ModelLoader._setup_tokenizer(model_name)
         
-        # Load model with quantization
+        # Load model with quantization and Flash Attention 2
+        model_kwargs = {
+            "quantization_config": ModelLoader.get_bnb_config(),
+            "device_map": device_map,
+            "torch_dtype": params.BNB_4BIT_COMPUTE_DTYPE,
+            "trust_remote_code": True,
+        }
+
+        # Enable Flash Attention 2 if supported
+        if use_flash_attention_2:
+            model_kwargs["attn_implementation"] = "flash_attention_2"
+
         model = AutoModelForCausalLM.from_pretrained(
             model_name,
-            quantization_config=ModelLoader.get_bnb_config(),
-            device_map=device_map,
-            torch_dtype=params.BNB_4BIT_COMPUTE_DTYPE,
-            trust_remote_code=True,
+            **model_kwargs
         )
         
         # Prepare for k-bit training
@@ -78,22 +86,31 @@ class ModelLoader:
         return tokenizer
     
     @staticmethod
-    def load_reference_model(model_path: str):
+    def load_reference_model(model_path: str, use_flash_attention_2: bool = True):
         """
         Load a reference model for DPO training (frozen, 4-bit).
-        
+
         Args:
             model_path: Path to the reference model
-            
+            use_flash_attention_2: Whether to use Flash Attention 2 (default: True)
+
         Returns:
             Reference model in eval mode
         """
+        model_kwargs = {
+            "quantization_config": ModelLoader.get_bnb_config(),
+            "device_map": params.DEVICE_MAP,
+            "torch_dtype": params.BNB_4BIT_COMPUTE_DTYPE,
+            "trust_remote_code": True,
+        }
+
+        # Enable Flash Attention 2 if supported
+        if use_flash_attention_2:
+            model_kwargs["attn_implementation"] = "flash_attention_2"
+
         model = AutoModelForCausalLM.from_pretrained(
             model_path,
-            quantization_config=ModelLoader.get_bnb_config(),
-            device_map=params.DEVICE_MAP,
-            torch_dtype=params.BNB_4BIT_COMPUTE_DTYPE,
-            trust_remote_code=True,
+            **model_kwargs
         )
         
         # Freeze and set to eval mode

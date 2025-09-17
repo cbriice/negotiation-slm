@@ -202,12 +202,16 @@ class SFTTrainingPipeline:
         logger.info(f"  LoRA rank: {params.R}")
         logger.info(f"  LoRA alpha: {params.ALPHA}")
         logger.info(f"  LoRA dropout: {params.DROPOUT}")
+        logger.info(f"  Flash Attention 2: {params.USE_FLASH_ATTENTION_2}")
 
-        # Load base model with 4-bit quantization
+        # Load base model with 4-bit quantization and Flash Attention 2
         start_time = time.time()
-        self.model, self.tokenizer = self.model_loader.load_model(self.model_name)
+        self.model, self.tokenizer = self.model_loader.load_model(
+            self.model_name,
+            use_flash_attention_2=params.USE_FLASH_ATTENTION_2
+        )
         load_time = time.time() - start_time
-        logger.info(f"Base model loaded in {load_time:.2f}s")
+        logger.info(f"Base model loaded in {load_time:.2f}s with Flash Attention 2: {params.USE_FLASH_ATTENTION_2}")
 
         if resume_from:
             logger.info(f"Loading checkpoint from: {resume_from}")
