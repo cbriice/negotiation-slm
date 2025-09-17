@@ -312,9 +312,179 @@ Tracked metrics include:
 - DPO reward margins (DPO only)
 - Error events and recovery actions
 
+## Checkpoint Management
+
+The training script includes comprehensive checkpoint management features via the `checkpoint` and `save` commands.
+
+### Manual Checkpoint Saving
+
+You can manually save a checkpoint at any point:
+
+```bash
+# Save a checkpoint from an existing model
+python scripts/train.py save \
+    --load-from models/sft/final_model \
+    --stage sft \
+    --description "Good performance on negotiation tasks"
+```
+
+### Checkpoint Operations
+
+**List all checkpoints:**
+```bash
+python scripts/train.py checkpoint list
+python scripts/train.py checkpoint list --stage sft  # Filter by stage
+```
+
+**Find best checkpoint by metric:**
+```bash
+python scripts/train.py checkpoint best --stage sft --metric loss
+python scripts/train.py checkpoint best --stage dpo --metric reward_margin
+```
+
+**View checkpoint history:**
+```bash
+python scripts/train.py checkpoint history
+python scripts/train.py checkpoint history --stage dpo
+```
+
+**Rollback to a previous checkpoint:**
+```bash
+# Rollback sets a checkpoint as "current" for future operations
+python scripts/train.py checkpoint rollback \
+    --checkpoint checkpoints/negotiation_sft_v3_20240315_143022
+```
+
+**Compare two checkpoints:**
+```bash
+python scripts/train.py checkpoint compare \
+    --checkpoint1 checkpoints/negotiation_sft_v2_20240315_140000 \
+    --checkpoint2 checkpoints/negotiation_sft_v3_20240315_143022
+```
+
+**Clean up old checkpoints:**
+```bash
+# Keep only the 3 most recent checkpoints
+python scripts/train.py checkpoint cleanup --keep 3
+
+# Clean up only SFT checkpoints
+python scripts/train.py checkpoint cleanup --keep 5 --stage sft
+```
+
+**Export checkpoint summary:**
+```bash
+python scripts/train.py checkpoint export --output checkpoint_report.json
+```
+
+### Using Checkpoints in Training
+
+**Resume training from checkpoint:**
+```bash
+# SFT training
+python scripts/train.py sft data/sft_data.jsonl \
+    --resume-from checkpoints/negotiation_sft_v2_20240315_140000
+
+# DPO training
+python scripts/train.py dpo --train-data data/dpo.jsonl \
+    --resume checkpoints/negotiation_dpo_v1_20240315_150000
+```
+
+**Use checkpoint as reference model for DPO:**
+```bash
+python scripts/train.py dpo \
+    --train-data data/dpo_pairs.jsonl \
+    --reference-model checkpoints/negotiation_sft_v3_20240315_143022
+```
+
+### Checkpoint Storage Structure
+
+Checkpoints are stored with the following naming convention:
+```
+checkpoints/
+├── negotiation_sft_v1_20240315_140000/
+│   ├── adapter_model.bin          # LoRA weights
+│   ├── adapter_config.json        # LoRA configuration
+│   ├── tokenizer_config.json      # Tokenizer config
+│   ├── special_tokens_map.json    # Special tokens
+│   └── checkpoint_info.json       # Metadata and metrics
+├── negotiation_sft_v2_20240315_141500/
+├── negotiation_dpo_v1_20240315_150000/
+└── checkpoints_summary.json       # Summary report (if exported)
+```
+
+### Automatic Checkpointing
+
+During training, checkpoints are automatically saved based on `SAVE_STEPS` and `SAVE_STRATEGY` in `training_parameters.py`:
+
+- **By steps**: Saves every N steps (default: 100)
+- **By epoch**: Saves at the end of each epoch
+- **Best model**: Automatically tracks and saves the best model based on evaluation metric
+
+The automatic checkpoints are saved to:
+- SFT: `models/sft/checkpoint-{step}/`
+- DPO: `checkpoints/dpo/checkpoint-{step}/`
+
+### Reverting Model State
+
+To revert a model to an earlier checkpoint:
+
+1. **Find the checkpoint you want:**
+   ```bash
+   python scripts/train.py checkpoint history --stage sft
+   ```
+
+2. **Rollback to that checkpoint:**
+   ```bash
+   python scripts/train.py checkpoint rollback \
+       --checkpoint checkpoints/negotiation_sft_v2_20240315_140000
+   ```
+
+3. **Use the checkpoint in training or testing:**
+   ```bash
+   # Test the rolled-back model
+   python scripts/train.py qlora --mode test \
+       --checkpoint checkpoints/negotiation_sft_v2_20240315_140000 \
+       --prompt "Test negotiation prompt"
+
+   # Continue training from that checkpoint
+   python scripts/train.py sft data/new_data.jsonl \
+       --resume-from checkpoints/negotiation_sft_v2_20240315_140000
+   ```
+
+### Checkpoint Metadata
+
+Each checkpoint includes metadata in `checkpoint_info.json`:
+```json
+{
+  "stage": "sft",
+  "version": 2,
+  "timestamp": "20240315_140000",
+  "metrics": {
+    "train_loss": 0.8234,
+    "eval_loss": 0.9123,
+    "train_samples_per_second": 45.2
+  },
+  "training_args": {
+    "learning_rate": 0.0002,
+    "batch_size": 4,
+    "gradient_accumulation_steps": 4
+  },
+  "dataset_stats": {
+    "num_examples": 1500,
+    "avg_length": 512
+  },
+  "model_type": "LoRA adapters",
+  "base_model": "mistralai/Mistral-7B-v0.1",
+  "training_duration_seconds": 3600,
+  "checkpoint_size_mb": 134.5
+}
+```
+
 ## Notes
 
 - All trainers use Flash Attention 2 when `USE_FLASH_ATTENTION_2=True` in training_parameters.py
 - Models are automatically loaded in 4-bit with QLoRA configuration
 - The wrapper script doesn't add logic - it just routes to existing implementations
 - Each trainer can also be run directly via their own CLI interfaces
+- Checkpoints save only LoRA adapters (not the full model) to save space
+- The CheckpointManager tracks rollback history and current checkpoint state

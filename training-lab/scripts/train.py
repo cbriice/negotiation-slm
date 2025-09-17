@@ -136,6 +136,131 @@ def run_qlora(args):
     trainer.cleanup()
 
 
+def manage_checkpoints(args):
+    """Manage model checkpoints."""
+    from training.checkpoint_manager import CheckpointManager
+    import json
+
+    manager = CheckpointManager(base_dir=args.checkpoint_dir or "checkpoints")
+
+    if args.action == 'list':
+        checkpoints = manager.list_checkpoints(stage=args.stage)
+        if not checkpoints:
+            print("No checkpoints found")
+            return
+
+        print(f"\nFound {len(checkpoints)} checkpoint(s):")
+        print("-" * 80)
+        for ckpt in checkpoints:
+            print(f"Path: {ckpt['path']}")
+            print(f"  Stage: {ckpt.get('stage', 'unknown')}")
+            print(f"  Version: {ckpt.get('version', 'unknown')}")
+            print(f"  Timestamp: {ckpt.get('timestamp', 'unknown')}")
+            metrics = ckpt.get('metrics', {})
+            if metrics:
+                print(f"  Metrics: loss={metrics.get('train_loss', 'N/A'):.4f}")
+            print()
+
+    elif args.action == 'best':
+        best = manager.get_best_checkpoint(stage=args.stage, metric=args.metric)
+        if best:
+            print(f"Best checkpoint for stage '{args.stage}' by {args.metric}:")
+            print(f"  {best}")
+        else:
+            print(f"No checkpoints found for stage '{args.stage}'")
+
+    elif args.action == 'rollback':
+        if not args.checkpoint:
+            print("Error: --checkpoint required for rollback")
+            sys.exit(1)
+        result = manager.rollback_to_checkpoint(args.checkpoint)
+        print(f"Rolled back to: {result['rolled_back_to']}")
+        print(f"Stage: {result['checkpoint_info'].get('stage')}")
+        print(f"Version: {result['checkpoint_info'].get('version')}")
+
+    elif args.action == 'compare':
+        if not args.checkpoint1 or not args.checkpoint2:
+            print("Error: --checkpoint1 and --checkpoint2 required for compare")
+            sys.exit(1)
+        comparison = manager.compare_checkpoints(args.checkpoint1, args.checkpoint2)
+        print("\nCheckpoint Comparison:")
+        print("-" * 80)
+        print(f"Checkpoint 1: {comparison['checkpoint1']['path']}")
+        print(f"  Stage: {comparison['checkpoint1']['stage']}, Version: {comparison['checkpoint1']['version']}")
+        print(f"Checkpoint 2: {comparison['checkpoint2']['path']}")
+        print(f"  Stage: {comparison['checkpoint2']['stage']}, Version: {comparison['checkpoint2']['version']}")
+
+        if comparison['metrics_diff']:
+            print("\nMetric Differences:")
+            for key, diff in comparison['metrics_diff'].items():
+                print(f"  {key}:")
+                print(f"    Checkpoint 1: {diff['checkpoint1']}")
+                print(f"    Checkpoint 2: {diff['checkpoint2']}")
+                if diff.get('change') is not None:
+                    print(f"    Change: {diff['change']:+.4f}")
+
+    elif args.action == 'cleanup':
+        manager.cleanup_old_checkpoints(keep_n=args.keep, stage=args.stage)
+        print(f"Cleaned up old checkpoints, keeping {args.keep} most recent")
+
+    elif args.action == 'export':
+        report_path = manager.export_checkpoint_summary(output_path=args.output)
+        print(f"Checkpoint summary exported to: {report_path}")
+
+    elif args.action == 'history':
+        history = manager.get_checkpoint_history(stage=args.stage)
+        print(f"\nCheckpoint History ({len(history)} total):")
+        print("-" * 80)
+        for ckpt in history[:10]:  # Show only last 10
+            status = "[CURRENT] " if ckpt.get('is_current') else ""
+            print(f"{status}{ckpt['path']}")
+            print(f"  Stage: {ckpt.get('stage')}, Version: {ckpt.get('version')}")
+            print(f"  Timestamp: {ckpt.get('timestamp')}")
+            print()
+
+
+def save_checkpoint(args):
+    """Manually save a checkpoint from current model."""
+    from training.qlora_trainer import QLoRATrainer
+    from training.checkpoint_manager import CheckpointManager
+
+    # Initialize trainer and load model
+    trainer = QLoRATrainer(
+        model_name=args.model or "mistralai/Mistral-7B-v0.1",
+        output_dir="models"
+    )
+
+    # Load the model from specified path
+    if args.load_from:
+        trainer.load_checkpoint(args.load_from)
+    else:
+        print("Error: --load-from required to specify which model to save")
+        sys.exit(1)
+
+    # Initialize checkpoint manager
+    manager = CheckpointManager(base_dir=args.checkpoint_dir or "checkpoints")
+
+    # Get version
+    version = args.version
+    if not version:
+        version = manager.get_next_version(args.stage)
+
+    # Save checkpoint
+    checkpoint_path = manager.save_checkpoint(
+        model=trainer.model,
+        tokenizer=trainer.tokenizer,
+        stage=args.stage,
+        version=version,
+        metrics={"manual_save": True, "description": args.description or ""},
+        training_args={"source": args.load_from}
+    )
+
+    print(f"Checkpoint saved to: {checkpoint_path}")
+
+    # Cleanup
+    trainer.cleanup()
+
+
 def show_info():
     """Display current training parameters."""
     import training_parameters as params
@@ -212,6 +337,14 @@ Examples:
 
   # Show current parameters
   python scripts/train.py info
+
+  # Checkpoint management
+  python scripts/train.py checkpoint list --stage sft
+  python scripts/train.py checkpoint best --stage dpo --metric reward_margin
+  python scripts/train.py checkpoint rollback --checkpoint checkpoints/negotiation_sft_v2_20240315
+
+  # Save checkpoint manually
+  python scripts/train.py save --load-from models/final --stage sft --description "Production ready"
         """
     )
 
@@ -260,6 +393,29 @@ Examples:
     # Info subcommand
     info_parser = subparsers.add_parser('info', help='Show current training parameters')
 
+    # Checkpoint management subcommand
+    checkpoint_parser = subparsers.add_parser('checkpoint', help='Manage model checkpoints')
+    checkpoint_parser.add_argument('action',
+                                  choices=['list', 'best', 'rollback', 'compare', 'cleanup', 'export', 'history'],
+                                  help='Checkpoint action to perform')
+    checkpoint_parser.add_argument('--checkpoint-dir', default='checkpoints', help='Checkpoint directory')
+    checkpoint_parser.add_argument('--stage', help='Filter by training stage (sft, dpo)')
+    checkpoint_parser.add_argument('--metric', default='loss', help='Metric for finding best checkpoint')
+    checkpoint_parser.add_argument('--checkpoint', help='Checkpoint path for rollback')
+    checkpoint_parser.add_argument('--checkpoint1', help='First checkpoint for comparison')
+    checkpoint_parser.add_argument('--checkpoint2', help='Second checkpoint for comparison')
+    checkpoint_parser.add_argument('--keep', type=int, default=5, help='Number of checkpoints to keep for cleanup')
+    checkpoint_parser.add_argument('--output', help='Output path for export')
+
+    # Save checkpoint subcommand
+    save_parser = subparsers.add_parser('save', help='Manually save a checkpoint')
+    save_parser.add_argument('--load-from', required=True, help='Model path to create checkpoint from')
+    save_parser.add_argument('--stage', required=True, help='Training stage label')
+    save_parser.add_argument('--version', type=int, help='Version number (auto-increments if not specified)')
+    save_parser.add_argument('--description', help='Description for this checkpoint')
+    save_parser.add_argument('--checkpoint-dir', default='checkpoints', help='Checkpoint directory')
+    save_parser.add_argument('--model', help='Model name or path')
+
     args = parser.parse_args()
 
     if not args.command:
@@ -278,6 +434,10 @@ Examples:
         run_qlora(args)
     elif args.command == 'info':
         show_info()
+    elif args.command == 'checkpoint':
+        manage_checkpoints(args)
+    elif args.command == 'save':
+        save_checkpoint(args)
 
 
 if __name__ == "__main__":
