@@ -36,6 +36,8 @@ logger = logging.getLogger(__name__)
 logging.getLogger('urllib3').setLevel(logging.WARNING)
 logging.getLogger('urllib3.connectionpool').setLevel(logging.WARNING)
 
+# NOTE: OllamaNegotiator actually has HuggingFace logic and model pulling inside for QLoRA compatibility. Name of the class was preserved to avoid import conflicts
+
 class OllamaNegotiator(NegotiatorBase):
     """Ollama model wrapped as a ParlAI negotiation agent."""
     
@@ -162,13 +164,26 @@ class OllamaNegotiator(NegotiatorBase):
             if self.tokenizer.pad_token is None:
                 self.tokenizer.pad_token = self.tokenizer.eos_token
 
-            # Load base model with quantization
+            # Calculate max_memory for GPU (use 85% like in training)
+            if torch.cuda.is_available():
+                # Get total VRAM in bytes
+                total_memory = torch.cuda.get_device_properties(0).total_memory
+                # Use 85% for model, leave 15% for activations
+                usable_memory = int(total_memory * 0.85)
+                max_memory = {0: f"{usable_memory}B"}
+                logger.info(f"Setting max GPU memory to {usable_memory / 1024**3:.2f}GB (85% of total)")
+            else:
+                max_memory = None
+
+            # Load base model with quantization and Flash Attention 2
             self.model = AutoModelForCausalLM.from_pretrained(
                 self.model_name,
                 quantization_config=bnb_config,
                 device_map="auto",
+                max_memory=max_memory,
                 trust_remote_code=True,
                 torch_dtype=torch.bfloat16,
+                attn_implementation="flash_attention_2",  # Enable Flash Attention 2
             )
 
             # Load LoRA adapter if provided

@@ -1,7 +1,7 @@
 import sys
 from pathlib import Path
-from typing import Any, Optional
-from dataclasses import dataclass
+from typing import Any, Optional, List
+from dataclasses import dataclass, field
 
 # Import existing training parameters
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -15,24 +15,24 @@ class TrainingConfig:
     output_dir: str = "./checkpoints"
     adapter_path: Optional[str] = None  # Path to LoRA adapters
     use_latest_checkpoint: bool = True  # Auto-load latest checkpoint
-    
+
     # Training hyperparameters (inherit from training_parameters.py)
     max_seq_len: int = MAX_SEQ_LEN
     per_device_batch_size: int = PER_DEVICE_BATCH_SIZE
     gradient_accumulation_steps: int = GRAD_ACCUM_STEPS
     seed: int = SEED
-    
+
     # QLoRA settings
     load_in_4bit: bool = LOAD_IN_4BIT
     bnb_4bit_quant_type: str = BNB_4BIT_QUANT_TYPE
     bnb_4bit_compute_dtype: Any = BNB_4BIT_COMPUTE_DTYPE
     bnb_4bit_use_double_quant: bool = BNB_4BIT_USE_DOUBLE_QUANT
-    
+
     # LoRA settings
     lora_r: int = R
     lora_alpha: int = ALPHA
     lora_dropout: float = DROPOUT
-    target_modules: list = []
+    target_modules: List[str] = field(default_factory=list)
     
     # Optimizer settings
     gradient_checkpointing: bool = GRADIENT_CHECKPOINTING
@@ -48,9 +48,9 @@ class TrainingConfig:
     eval_strategy: str = EVAL_STRATEGY
     
     def __post_init__(self):
-        if self.target_modules is None:
+        if not self.target_modules:  # Check if list is empty
             self.target_modules = TARGET_MODULES.copy()
-        
+
         # Create output directory
         output_path = Path(self.output_dir) / self.stage
         output_path.mkdir(parents=True, exist_ok=True)
@@ -153,18 +153,25 @@ def get_checkpoint_path(stage: str, step: Optional[int] = None) -> Path:
 
 def get_latest_adapter_path() -> Optional[Path]:
     """Find the most recent adapter checkpoint across all stages."""
-    checkpoints_dir = Path('./checkpoints')
-    if not checkpoints_dir.exists():
-        return None
+    # Check both ./checkpoints and data/checkpoints
+    possible_dirs = [Path('./checkpoints'), Path('data/checkpoints')]
 
-    # Find all adapter_model.bin files with their modification times
     adapter_files = []
-    for stage_dir in checkpoints_dir.iterdir():
-        if stage_dir.is_dir():
-            for checkpoint_dir in stage_dir.glob('checkpoint-*'):
-                adapter_file = checkpoint_dir / 'adapter_model.bin'
-                if adapter_file.exists():
-                    adapter_files.append((adapter_file.stat().st_mtime, checkpoint_dir))
+
+    for checkpoints_dir in possible_dirs:
+        if not checkpoints_dir.exists():
+            continue
+
+        # Find all adapter files (both .bin and .safetensors) with their modification times
+        for stage_dir in checkpoints_dir.iterdir():
+            if stage_dir.is_dir():
+                for checkpoint_dir in stage_dir.glob('checkpoint-*'):
+                    # Check for both .bin and .safetensors formats
+                    for adapter_name in ['adapter_model.bin', 'adapter_model.safetensors']:
+                        adapter_file = checkpoint_dir / adapter_name
+                        if adapter_file.exists():
+                            adapter_files.append((adapter_file.stat().st_mtime, checkpoint_dir))
+                            break  # Found an adapter in this checkpoint, no need to check other formats
 
     if adapter_files:
         # Return the checkpoint directory with the most recent adapter

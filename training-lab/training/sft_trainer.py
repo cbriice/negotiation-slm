@@ -188,6 +188,16 @@ class SFTTrainingPipeline:
             format_func=self.format_chat_template
         )
         logger.info(f"Preprocessed {len(preprocessed)} examples")
+
+        # Verify the dataset has the required 'text' field
+        if 'text' not in preprocessed.column_names:
+            raise ValueError(f"Dataset missing 'text' field. Available columns: {preprocessed.column_names}")
+
+        # Log a sample to verify formatting
+        if len(preprocessed) > 0:
+            sample_text = preprocessed[0]['text']
+            logger.debug(f"Sample text (first 200 chars): {sample_text[:200]}...")
+
         return preprocessed
 
     def setup_model(self, resume_from: Optional[str] = None):
@@ -223,10 +233,18 @@ class SFTTrainingPipeline:
             self.model = self.lora_configurator.apply_lora(self.model)
             logger.info("LoRA configuration applied")
 
-        # Ensure tokenizer has padding token
+        # Ensure tokenizer has padding token and proper configuration
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
             logger.debug("Set pad_token to eos_token")
+
+        # Ensure tokenizer has proper padding settings for SFTTrainer
+        self.tokenizer.padding_side = "right"  # SFTTrainer expects right padding
+        self.tokenizer.truncation_side = "right"
+
+        # Set model's pad_token_id to match tokenizer
+        if hasattr(self.model, 'config'):
+            self.model.config.pad_token_id = self.tokenizer.pad_token_id
 
         # Log model info
         trainable_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
@@ -303,7 +321,7 @@ class SFTTrainingPipeline:
             eval_steps=params.SAVE_STEPS if eval_dataset else None,
             seed=params.SEED,
             dataloader_num_workers=4,
-            remove_unused_columns=False,
+            remove_unused_columns=True,  # Let SFTTrainer manage columns
             report_to=["tensorboard"],
             logging_dir=str(output_dir / "logs"),
             # SFT specific configs
@@ -319,12 +337,8 @@ class SFTTrainingPipeline:
             train_dataset=train_dataset,
             eval_dataset=eval_dataset,
             args=training_args,
-            # Note: dataset_text_field, max_seq_length, and packing are now in SFTConfig
-            data_collator=DataCollatorForLanguageModeling(
-                tokenizer=self.tokenizer,
-                mlm=False,
-                pad_to_multiple_of=8,  # Optimize for tensor cores
-            ),
+            # SFTTrainer will handle tokenization and data collation automatically
+            # when dataset_text_field is specified in training_args
         )
 
         logger.info("Training Configuration:")
@@ -393,7 +407,12 @@ class SFTTrainingPipeline:
                                 step=step
                             )
 
-                        # Log all error handlers
+                        # Log all error handlers (pass model to gradient monitor)
+                        if self.parent.gradient_monitor:
+                            # Set model for gradient monitoring if not already set
+                            if not hasattr(self.parent.gradient_monitor, 'model') or self.parent.gradient_monitor.model is None:
+                                self.parent.gradient_monitor.model = kwargs.get('model', self.parent.model)
+
                         self.parent.tb_writer.log_all_error_handlers(
                             batch_optimizer=self.parent.batch_optimizer,
                             gradient_monitor=self.parent.gradient_monitor,

@@ -62,7 +62,8 @@ class ModelLoader:
         
         # Enable gradient checkpointing if specified
         if params.GRADIENT_CHECKPOINTING:
-            model.gradient_checkpointing_enable()
+            # Use use_reentrant=False for better memory efficiency and to avoid deprecation warning
+            model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
             
         return model, tokenizer
     
