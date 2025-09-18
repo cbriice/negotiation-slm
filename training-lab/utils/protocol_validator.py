@@ -387,8 +387,19 @@ def validate_episode_for_training(episode: Dict[str, Any]) -> Tuple[bool, List[s
             reasons.append(f"Contains critical violation: {violation}")
     
     # Check if episode has sufficient content
+    # Handle both episode formats - with metrics or with dialogue
     action_history = episode.get('metrics', {}).get('action_history', [])
-    if len(action_history) < 2:
-        reasons.append("Insufficient interaction (less than 2 turns)")
-    
+    dialogue = episode.get('dialogue', [])
+
+    # Check action history if available, otherwise check dialogue length
+    if action_history:
+        if len(action_history) < 2:
+            reasons.append("Insufficient interaction (less than 2 turns)")
+    elif dialogue:
+        # For exported episodes, check dialogue instead
+        if len(dialogue) < 1:  # At least one exchange needed
+            reasons.append("Insufficient dialogue content")
+    else:
+        reasons.append("No dialogue or action history found")
+
     return len(reasons) == 0, reasons

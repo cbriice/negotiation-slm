@@ -8,8 +8,7 @@ from typing import Dict, Any, List, Optional, Tuple
 from pathlib import Path
 import re
 from parlai.core.params import ParlaiParser
-from parlai.core.worlds import create_task
-from parlai.core.agents import create_agent
+from parlai.core.teachers import create_task_agent_from_taskname
 
 # Set up logging (will use parent logger from data_converter if available)
 logger = logging.getLogger(__name__)
@@ -22,11 +21,10 @@ class BuiltinTaskExporter:
         """Initialize the exporter."""
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        
+
         # Task-specific parsers
         self.task_parsers = {
-            'dealnodeal': self._parse_dealnodeal,
-            'casino': self._parse_casino
+            'dealnodeal': self._parse_dealnodeal
         }
     
     def save_jsonl(self, data: List[Dict], filepath: Path) -> None:
@@ -54,94 +52,139 @@ class BuiltinTaskExporter:
                    datatype: str = 'train') -> List[Dict[str, Any]]:
         """
         Export a single ParlAI task to episode format.
-        
+
         Args:
             task_name: Name of ParlAI task ('dealnodeal', 'casino')
             max_episodes: Maximum episodes to extract
             datatype: Data split ('train', 'valid', 'test')
-        
+
         Returns:
             List of episodes in standard format
         """
         logger.info(f"Exporting {task_name} ({datatype})...")
-        
+
         try:
-            # Setup ParlAI task
-            parser = ParlaiParser(add_model_args=True, add_parlai_args=True)
-            parser.set_params(
-                task=task_name,
-                datatype=datatype,
-                datapath='data/parlai'
-            )
+            # Setup ParlAI parser options
+            parser = ParlaiParser(add_parlai_args=True, add_model_args=False)
             opt = parser.parse_args([], print_args=False)
-            
-            # Create task world
-            agent = create_agent(opt, requireModelExists=False)
-            world = create_task(opt, agent)
-            
-            # Extract episodes
+            opt['task'] = task_name
+            opt['datatype'] = datatype
+            opt['datapath'] = 'data/parlai'
+            opt['interactive_task'] = False
+
+            # Create teacher agent directly from task
+            teacher = create_task_agent_from_taskname(opt)[0]
+
+            # Extract full episodes
             episodes = []
             episode_count = 0
-            
-            while episode_count < max_episodes:
-                world.parley()
-                obs = world.get_acts()[0]
-                
-                if obs and 'text' in obs:
-                    # Convert to episode format
-                    episode = self._convert_observation(obs, task_name)
-                    if episode:
-                        episodes.append(episode)
-                        episode_count += 1
-                
-                if world.epoch_done():
-                    logger.info(f"Epoch complete: {episode_count} episodes extracted")
-                    break
-            
+            current_episode_data = []
+            current_state = {}
+
+            while not teacher.epoch_done() and episode_count < max_episodes:
+                # Get example from teacher
+                example = teacher.act()
+
+                if example:
+                    # Check if this starts a new episode (has 'items' in dealornodeal)
+                    if 'items' in example:
+                        # Process previous episode if exists
+                        if current_episode_data:
+                            episode = self._build_full_episode(current_episode_data, current_state, task_name)
+                            if episode:
+                                episodes.append(episode)
+                                episode_count += 1
+                                if episode_count % 100 == 0:
+                                    logger.info(f"  Extracted {episode_count} episodes...")
+
+                        # Start new episode
+                        current_state = {'items': example.get('items', {})}
+                        current_episode_data = [example]
+                    else:
+                        # Add to current episode
+                        current_episode_data.append(example)
+
+                    # Check if episode is done
+                    if example.get('episode_done', False):
+                        # Process completed episode
+                        if current_episode_data:
+                            episode = self._build_full_episode(current_episode_data, current_state, task_name)
+                            if episode:
+                                episodes.append(episode)
+                                episode_count += 1
+                                if episode_count % 100 == 0:
+                                    logger.info(f"  Extracted {episode_count} episodes...")
+                        # Reset for next episode
+                        current_episode_data = []
+                        current_state = {}
+
+                # Prepare for next example
+                teacher.observe({'episode_done': example.get('episode_done', False)})
+
+            # Process any remaining episode
+            if current_episode_data:
+                episode = self._build_full_episode(current_episode_data, current_state, task_name)
+                if episode:
+                    episodes.append(episode)
+                    episode_count += 1
+
+            logger.info(f"Extracted total of {episode_count} episodes from {task_name}")
             return episodes
-            
+
         except Exception as e:
             logger.error(f"Error exporting {task_name}: {e}")
+            import traceback
+            traceback.print_exc()
             return []
     
-    def _convert_observation(self, 
+    def _convert_observation(self,
                            obs: Dict[str, Any],
                            task_name: str) -> Optional[Dict[str, Any]]:
         """
         Convert ParlAI observation to episode format.
-        
+
         Args:
             obs: ParlAI observation dict
             task_name: Name of the task
-        
+
         Returns:
             Episode dict or None if conversion fails
         """
+        # Get text - handle different field names from teacher
         text = obs.get('text', '')
+
+        # Get labels/response
         labels = obs.get('labels', obs.get('eval_labels', []))
-        
-        if not text:
+        if not labels:
+            # Try to get labels_vec if text labels not available
+            labels = obs.get('labels_vec', [])
+
+        if not text and not labels:
             return None
-        
+
         # Parse using task-specific parser
         parser = self.task_parsers.get(task_name, self._parse_generic)
         dialogue, state = parser(text, labels)
-        
+
         if not dialogue:
             return None
-        
+
         # Create episode
         episode = {
             'state': state,
             'dialogue': dialogue,
             'meta': {
                 'source_task': task_name,
-                'episode_id': f"{task_name}_{hash(text)%100000}",
+                'episode_id': f"{task_name}_{abs(hash(text))%100000}",
                 'datatype': obs.get('datatype', 'train'),
-                'original_text': text[:500]  # Store snippet for debugging
+                'episode_done': obs.get('episode_done', False)
             }
         }
-        
+
+        # Add original text snippet for debugging if present
+        if text:
+            episode['meta']['original_text'] = text[:500]
+
         return episode
     
     def _parse_dealnodeal(self, 
@@ -216,6 +259,74 @@ class BuiltinTaskExporter:
         
         return dialogue, state
     
+    def _build_full_episode(self,
+                           episode_data: List[Dict[str, Any]],
+                           state: Dict[str, Any],
+                           task_name: str) -> Optional[Dict[str, Any]]:
+        """
+        Build a complete episode from collected turns.
+
+        Args:
+            episode_data: List of turns from teacher
+            state: Episode state (e.g., items)
+            task_name: Name of the task
+
+        Returns:
+            Complete episode dict or None
+        """
+        if not episode_data:
+            return None
+
+        dialogue = []
+        full_text = []
+
+        for i, turn in enumerate(episode_data):
+            text = turn.get('text', '')
+            labels = turn.get('labels', [])
+
+            if text:
+                full_text.append(text)
+
+            # Build dialogue turn
+            if i == 0 and 'items' in turn:
+                # First turn with context - use label as first agent response
+                if labels:
+                    dialogue.append({
+                        'text': text,
+                        'response': labels[0],
+                        'side': 'agent',
+                        'action': 'PROPOSE'
+                    })
+            else:
+                # Regular dialogue turn
+                if labels:
+                    dialogue.append({
+                        'text': text,
+                        'response': labels[0],
+                        'side': 'agent' if i % 2 == 0 else 'partner',
+                        'action': 'PROPOSE'
+                    })
+
+        if not dialogue:
+            return None
+
+        # Create full episode
+        episode_state = {'task': task_name, 'category': 'negotiation'}
+        episode_state.update(state)
+
+        episode = {
+            'state': episode_state,
+            'dialogue': dialogue,
+            'meta': {
+                'source_task': task_name,
+                'episode_id': f"{task_name}_{abs(hash(''.join(full_text)))%100000}",
+                'datatype': episode_data[0].get('datatype', 'train'),
+                'num_turns': len(dialogue)
+            }
+        }
+
+        return episode
+
     def _parse_casino(self,
                      text: str,
                      labels: List[str]) -> Tuple[List[Dict], Dict]:

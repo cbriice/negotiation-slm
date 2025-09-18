@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Baseline training script using ParlAI built-in negotiation tasks.
-Implements step 2 of the training plan: 0.5 epochs each of Deal-or-No-Deal and Casino tasks.
+Implements step 2 of the training plan using Deal-or-No-Deal task.
 """
 
 import argparse
@@ -24,7 +24,6 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.StreamHandler(),
         logging.FileHandler('logs/baseline_training.log')
     ]
 )
@@ -49,9 +48,9 @@ def export_builtin_tasks(output_dir: str = "data/training/builtin_tasks",
 
     exporter = BuiltinTaskExporter(output_dir=output_dir)
 
-    # Export both negotiation tasks
+    # Export dealnodeal task (casino doesn't exist in ParlAI)
     task_files = exporter.export_all_tasks(
-        task_names=['dealnodeal', 'casino'],
+        task_names=['dealnodeal'],
         max_episodes_per_task=episodes_per_task
     )
 
@@ -143,9 +142,14 @@ def calculate_epoch_fraction(sft_file: str,
     for task, count in task_counts.items():
         logger.info(f"  {task}: {count} examples")
 
-    # Calculate steps for 0.5 epochs per task
-    # Since we have 2 tasks, 0.5 epochs each = 1 total epoch
-    total_epochs = len(task_counts) * target_epochs_per_task
+    # Calculate epochs - adjust if only one task
+    # If we only have dealnodeal, we'll do more epochs on it
+    num_tasks = len(task_counts)
+    if num_tasks == 1:
+        # Only dealnodeal - do full epoch instead of 0.5
+        total_epochs = 1.0
+    else:
+        total_epochs = num_tasks * target_epochs_per_task
 
     # Calculate steps based on batch size
     effective_batch_size = params.PER_DEVICE_BATCH_SIZE * params.GRAD_ACCUM_STEPS
@@ -237,9 +241,9 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 This script implements step 2 of the negotiation training plan:
-- Exports Deal-or-No-Deal and Casino tasks from ParlAI
-- Converts them to SFT format
-- Runs 0.5 epochs of training on each task
+- Exports Deal-or-No-Deal task from ParlAI (Note: Casino task not available in ParlAI)
+- Converts it to SFT format
+- Runs training epochs as specified
 - Saves the baseline model for future DPO reference
 
 Example usage:
