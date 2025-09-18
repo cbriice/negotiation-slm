@@ -8,11 +8,13 @@ import sys
 from pathlib import Path
 
 # Add project root to path
+sys.path.insert(0, str(Path(__file__).parent.parent))
 sys.path.insert(0, str(Path(__file__).parent))
 
 from parlai.core.params import ParlaiParser
 from parlai.core.script import ParlaiScript
 from worlds.selfchat_world import SelfChatWorld
+from config.training_config import get_latest_adapter_path
 
 # Set up logging
 logging.basicConfig(
@@ -49,15 +51,29 @@ class SelfChatRunner(ParlaiScript):
         parser.add_argument(
             '--model',
             type=str,
-            default='agents.ollama_wrapper:OllamaNegotiator',
+            default='agents.hf_negotiator:HFNegotiator',
             help='Model to use for agents'
         )
-        
+
         parser.add_argument(
             '--model-name',
             type=str,
-            default='mistral:7b',
-            help='Ollama model name'
+            default='mistralai/Mistral-7B-v0.1',
+            help='HuggingFace model name'
+        )
+
+        parser.add_argument(
+            '--adapter-path',
+            type=str,
+            default=None,
+            help='Path to LoRA adapter checkpoint'
+        )
+
+        parser.add_argument(
+            '--use-latest-checkpoint',
+            action='store_true',
+            default=True,
+            help='Automatically load the latest adapter checkpoint'
         )
         
         parser.add_argument(
@@ -85,10 +101,19 @@ class SelfChatRunner(ParlaiScript):
     def run(self):
         """Run the self-chat simulations."""
         opt = self.opt
-        
+
         # Ensure task is set for ParlAI World
         if 'task' not in opt:
             opt['task'] = 'selfplay'
+
+        # Auto-load latest checkpoint if requested and no adapter path provided
+        if opt.get('use_latest_checkpoint') and not opt.get('adapter_path'):
+            latest_adapter = get_latest_adapter_path()
+            if latest_adapter:
+                opt['adapter_path'] = str(latest_adapter)
+                logger.info(f"Auto-loading latest adapter checkpoint: {latest_adapter}")
+            else:
+                logger.info("No adapter checkpoints found, using base model")
         
         # Set up debug logging if requested
         if opt.get('debug'):
@@ -100,10 +125,13 @@ class SelfChatRunner(ParlaiScript):
         logger.info(f"Target episodes: {opt.get('num_episodes', 1500)}")
         logger.info(f"Max turns per episode: {opt.get('max_turns', 20)}")
         logger.info(f"Output directory: {opt.get('output_dir', 'data/negotiations/selfchat/')}")
-        logger.info(f"Model: {opt.get('model_name', 'mistral:7b')}")
-        if opt.get('model_checkpoint'):
+        logger.info(f"Model: {opt.get('model_name', 'mistralai/Mistral-7B-v0.1')}")
+        if opt.get('adapter_path'):
+            logger.info(f"LoRA adapter: {opt.get('adapter_path')}")
+        elif opt.get('model_checkpoint'):
             logger.info(f"LoRA checkpoint: {opt.get('model_checkpoint')}")
         logger.info(f"Two-part response: {opt.get('use_two_part_response', True)}")
+        logger.info(f"Use latest checkpoint: {opt.get('use_latest_checkpoint', True)}")
         logger.info("="*60 + "\n")
         
         # Initialize world variable
@@ -111,6 +139,10 @@ class SelfChatRunner(ParlaiScript):
         
         try:
             # Create SelfChatWorld
+            # Pass adapter path to world if available
+            if opt.get('adapter_path'):
+                logger.info(f"Initializing world with adapter: {opt['adapter_path']}")
+
             world = SelfChatWorld(opt)
             
             # Load seeds

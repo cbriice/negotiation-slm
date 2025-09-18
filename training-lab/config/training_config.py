@@ -11,8 +11,10 @@ from training_parameters import *
 class TrainingConfig:
     """Configuration for different training stages."""
     stage: str
-    model_name: str = "mistral:7b"
+    model_name: str = "mistralai/Mistral-7B-v0.1"  # HuggingFace model name
     output_dir: str = "./checkpoints"
+    adapter_path: Optional[str] = None  # Path to LoRA adapters
+    use_latest_checkpoint: bool = True  # Auto-load latest checkpoint
     
     # Training hyperparameters (inherit from training_parameters.py)
     max_seq_len: int = MAX_SEQ_LEN
@@ -148,3 +150,25 @@ def get_checkpoint_path(stage: str, step: Optional[int] = None) -> Path:
         # Return the latest checkpoint
         checkpoints = sorted(base_path.glob('checkpoint-*'))
         return checkpoints[-1] if checkpoints else base_path
+
+def get_latest_adapter_path() -> Optional[Path]:
+    """Find the most recent adapter checkpoint across all stages."""
+    checkpoints_dir = Path('./checkpoints')
+    if not checkpoints_dir.exists():
+        return None
+
+    # Find all adapter_model.bin files with their modification times
+    adapter_files = []
+    for stage_dir in checkpoints_dir.iterdir():
+        if stage_dir.is_dir():
+            for checkpoint_dir in stage_dir.glob('checkpoint-*'):
+                adapter_file = checkpoint_dir / 'adapter_model.bin'
+                if adapter_file.exists():
+                    adapter_files.append((adapter_file.stat().st_mtime, checkpoint_dir))
+
+    if adapter_files:
+        # Return the checkpoint directory with the most recent adapter
+        adapter_files.sort(reverse=True)
+        return adapter_files[0][1]
+
+    return None

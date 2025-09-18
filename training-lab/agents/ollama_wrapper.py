@@ -3,7 +3,13 @@ import json
 import time
 from typing import Optional, Tuple, Dict, Any
 from pathlib import Path
-import requests
+import torch
+from transformers import (
+    AutoModelForCausalLM,
+    AutoTokenizer,
+    BitsAndBytesConfig,
+)
+from peft.peft_model import PeftModel
 
 from agents.negotiator_base import NegotiatorBase, NegotiationAction
 from agents.token_metrics import TokenMetrics
@@ -36,18 +42,24 @@ class OllamaNegotiator(NegotiatorBase):
     @classmethod
     def add_cmdline_args(cls, argparser, partial_opt=None):
         """Add command-line arguments specific to this agent."""
-        agent = argparser.add_argument_group('Ollama Negotiator Arguments')
+        agent = argparser.add_argument_group('HF Negotiator Arguments')
         agent.add_argument(
             '--model-name',
             type=str,
-            default='mistral:7b',
-            help='Ollama model name (e.g., mistral:7b, mistral:latest)'
+            default='mistralai/Mistral-7B-v0.1',
+            help='HuggingFace model name'
         )
         agent.add_argument(
-            '--ollama-host',
+            '--adapter-path',
             type=str,
-            default='http://localhost:11434',
-            help='Ollama API host URL'
+            default=None,
+            help='Path to LoRA adapter checkpoint'
+        )
+        agent.add_argument(
+            '--use-latest-checkpoint',
+            action='store_true',
+            default=True,
+            help='Automatically load the latest adapter checkpoint'
         )
         agent.add_argument(
             '--temperature',
@@ -83,15 +95,23 @@ class OllamaNegotiator(NegotiatorBase):
     
     def __init__(self, opt, shared=None):
         super().__init__(opt, shared)
-        
+
         # Model configuration
-        self.model_name = opt.get('model_name', 'mistral:7b')
-        self.ollama_host = opt.get('ollama_host', 'http://localhost:11434')
+        self.model_name = opt.get('model_name', 'mistralai/Mistral-7B-v0.1')
+        self.adapter_path = opt.get('adapter_path', None)
+        self.use_latest_checkpoint = opt.get('use_latest_checkpoint', True)
         self.temperature = opt.get('temperature', MODEL_TEMP)
         self.top_p = opt.get('top_p', 0.9)
         self.max_tokens = opt.get('max_tokens', 256)
-        self.timeout = opt.get('timeout', 30)
         self.system_prompt = opt.get('system_prompt', None)
+
+        # Load HF model and tokenizer
+        if shared and 'model' in shared:
+            self.model = shared['model']
+            self.tokenizer = shared['tokenizer']
+            logger.info("Using shared model instance")
+        else:
+            self._load_hf_model()
         
         # Two-part response configuration
         self.use_two_part_response = opt.get('use_two_part_response', USE_TWO_PART_RESPONSE)
@@ -106,25 +126,72 @@ class OllamaNegotiator(NegotiatorBase):
         # Dialogue flow manager for prompt generation
         self.dialogue_flow = DialogueFlowManager()
         
-        # Test connection to Ollama
-        self._test_connection()
+        # Set device
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        logger.info(f"Using device: {self.device}")
     
-    def _test_connection(self):
-        """Test connection to Ollama service."""
+    def _load_hf_model(self):
+        """Load HuggingFace model with optional LoRA adapters."""
+        logger.info(f"Loading HF model: {self.model_name}")
+
+        # Auto-load latest checkpoint if requested
+        if self.use_latest_checkpoint and not self.adapter_path:
+            from config.training_config import get_latest_adapter_path
+            latest_adapter = get_latest_adapter_path()
+            if latest_adapter:
+                self.adapter_path = str(latest_adapter)
+                logger.info(f"Auto-loading latest adapter: {self.adapter_path}")
+
+        # Set up quantization config for 4-bit loading
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_compute_dtype=torch.bfloat16,
+            bnb_4bit_use_double_quant=True,
+        )
+
         try:
-            response = requests.get(f"{self.ollama_host}/api/tags", timeout=5)
-            if response.status_code == 200:
-                models = response.json().get('models', [])
-                model_names = [m['name'] for m in models]
-                if self.model_name not in model_names:
-                    logger.warning(f"Model {self.model_name} not found in Ollama. Available models: {model_names}")
+            # Load tokenizer
+            self.tokenizer = AutoTokenizer.from_pretrained(
+                self.model_name,
+                trust_remote_code=True,
+                padding_side='left',
+            )
+
+            # Add padding token if missing
+            if self.tokenizer.pad_token is None:
+                self.tokenizer.pad_token = self.tokenizer.eos_token
+
+            # Load base model with quantization
+            self.model = AutoModelForCausalLM.from_pretrained(
+                self.model_name,
+                quantization_config=bnb_config,
+                device_map="auto",
+                trust_remote_code=True,
+                torch_dtype=torch.bfloat16,
+            )
+
+            # Load LoRA adapter if provided
+            if self.adapter_path:
+                adapter_path = Path(self.adapter_path)
+                if adapter_path.exists():
+                    logger.info(f"Loading LoRA adapter from: {adapter_path}")
+                    self.model = PeftModel.from_pretrained(
+                        self.model,
+                        str(adapter_path),
+                        torch_dtype=torch.bfloat16,
+                    )
+                    logger.info("LoRA adapter loaded successfully")
                 else:
-                    logger.info(f"Successfully connected to Ollama. Using model: {self.model_name}")
-            else:
-                logger.error(f"Failed to connect to Ollama: HTTP {response.status_code}")
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Failed to connect to Ollama at {self.ollama_host}: {e}")
-            logger.info("Make sure Ollama is running: 'ollama serve'")
+                    logger.warning(f"Adapter path does not exist: {adapter_path}")
+
+            # Set model to eval mode
+            self.model.eval()
+            logger.info("Model loaded successfully")
+
+        except Exception as e:
+            logger.error(f"Failed to load model: {e}")
+            raise
     
     def _build_strategy_prompt(self) -> str:
         """Build the prompt for strategy generation."""
@@ -217,57 +284,58 @@ class OllamaNegotiator(NegotiatorBase):
         
         return action, text
     
-    def _generate_response(self, prompt: str, temperature: Optional[float] = None, 
+    def _generate_response(self, prompt: str, temperature: Optional[float] = None,
                           max_tokens: Optional[int] = None) -> Tuple[str, int, int]:
-        """Generate response using Ollama API. Returns (response, prompt_tokens, output_tokens)."""
+        """Generate response using HuggingFace model. Returns (response, prompt_tokens, output_tokens)."""
         try:
-            # Build the request payload
-            payload = {
-                "model": self.model_name,
-                "prompt": prompt,
-                "stream": False,
-                "options": {
-                    "temperature": temperature if temperature is not None else self.temperature,
-                    "top_p": self.top_p,
-                    "num_predict": max_tokens if max_tokens is not None else self.max_tokens,
-                }
-            }
-            
-            # Add system prompt if provided
+            # Prepare full prompt with system prompt if provided
+            full_prompt = prompt
             if self.system_prompt:
-                payload["system"] = self.system_prompt
-            
-            # Make request to Ollama
-            response = requests.post(
-                f"{self.ollama_host}/api/generate",
-                json=payload,
-                timeout=self.timeout
+                full_prompt = f"{self.system_prompt}\n\n{prompt}"
+
+            # Tokenize input
+            inputs = self.tokenizer(
+                full_prompt,
+                return_tensors="pt",
+                truncation=True,
+                max_length=2048,
+            ).to(self.device)
+
+            # Count prompt tokens
+            prompt_tokens = inputs['input_ids'].shape[1]
+
+            # Generate with the model
+            with torch.no_grad():
+                outputs = self.model.generate(
+                    **inputs,
+                    max_new_tokens=max_tokens if max_tokens is not None else self.max_tokens,
+                    temperature=temperature if temperature is not None else self.temperature,
+                    top_p=self.top_p,
+                    do_sample=True,
+                    pad_token_id=self.tokenizer.pad_token_id,
+                    eos_token_id=self.tokenizer.eos_token_id,
+                )
+
+            # Decode the response (only the new tokens)
+            response = self.tokenizer.decode(
+                outputs[0][inputs['input_ids'].shape[1]:],
+                skip_special_tokens=True
             )
-            
-            if response.status_code == 200:
-                result = response.json()
-                text = result.get('response', '')
-                # Estimate tokens (simple approximation)
-                prompt_tokens = len(prompt.split()) * 1.3
-                output_tokens = len(text.split()) * 1.3
-                return text, int(prompt_tokens), int(output_tokens)
-            else:
-                logger.error(f"Ollama API error: HTTP {response.status_code}")
-                fallback = "I'm having technical difficulties. Let's continue negotiating."
-                return fallback, 0, len(fallback.split())
-                
-        except requests.exceptions.Timeout:
-            logger.error(f"Ollama request timed out after {self.timeout} seconds")
-            fallback = "Let me think about that offer."
-            return fallback, 0, len(fallback.split())
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Ollama API error: {e}")
-            fallback = "Let's continue with the negotiation."
-            return fallback, 0, len(fallback.split())
+
+            # Count output tokens
+            output_tokens = outputs.shape[1] - prompt_tokens
+
+            return response.strip(), prompt_tokens, output_tokens
+
+        except torch.cuda.OutOfMemoryError:
+            logger.error("GPU out of memory. Consider reducing batch size or max tokens.")
+            torch.cuda.empty_cache()
+            fallback = "Let me reconsider that offer."
+            return fallback, 0, len(self.tokenizer.encode(fallback))
         except Exception as e:
-            logger.error(f"Unexpected error: {e}")
-            fallback = "I need to reconsider."
-            return fallback, 0, len(fallback.split())
+            logger.error(f"Error generating response: {e}")
+            fallback = "Let's continue with the negotiation."
+            return fallback, 0, len(self.tokenizer.encode(fallback))
     
     def generate_strategy(self) -> Dict[str, Any]:
         """Generate a negotiation strategy using internal prompt generation."""
@@ -477,11 +545,12 @@ class OllamaNegotiator(NegotiatorBase):
     def share(self):
         """Share model configuration across agents."""
         shared = super().share()
-        # Ollama runs as a service, so no model to share in memory
-        # Just share configuration
-        shared['ollama_config'] = {
+        # Share the loaded model and tokenizer for efficiency
+        shared['model'] = self.model
+        shared['tokenizer'] = self.tokenizer
+        shared['hf_config'] = {
             'model_name': self.model_name,
-            'ollama_host': self.ollama_host,
+            'adapter_path': self.adapter_path,
             'temperature': self.temperature,
             'top_p': self.top_p,
             'max_tokens': self.max_tokens
