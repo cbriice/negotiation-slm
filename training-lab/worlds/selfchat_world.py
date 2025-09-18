@@ -113,12 +113,15 @@ class SelfChatWorld(World):
         self.output_dir = Path(opt.get('output_dir', 'data/negotiations/selfchat/'))
         self.save_metrics_every = opt.get('save_metrics_every', 50)
         
-        # Create output directories
+        # Create output directories with timestamped transcripts folder
         self.episodes_dir = self.output_dir / 'episodes'
         self.metrics_dir = self.output_dir / 'metrics'
         self.seeds_dir = self.output_dir / 'seeds'
-        self.transcripts_dir = self.output_dir / 'transcripts'
-        
+
+        # Create timestamped folder for this session's transcripts
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        self.transcripts_dir = self.output_dir / 'transcripts' / f'run_{timestamp}'
+
         for dir_path in [self.episodes_dir, self.metrics_dir, self.seeds_dir, self.transcripts_dir]:
             dir_path.mkdir(parents=True, exist_ok=True)
         
@@ -510,6 +513,8 @@ class SelfChatWorld(World):
     
     def _save_transcript(self, episode: Dict[str, Any]):
         """Save human-readable transcript of the episode."""
+        # Ensure transcript directory exists (in case of parallel execution)
+        self.transcripts_dir.mkdir(parents=True, exist_ok=True)
         transcript_file = self.transcripts_dir / f"{episode['episode_id']}_transcript.txt"
         
         with open(transcript_file, 'w') as f:
