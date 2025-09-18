@@ -26,6 +26,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Suppress urllib3 debug logs
+logging.getLogger('urllib3').setLevel(logging.WARNING)
+logging.getLogger('urllib3.connectionpool').setLevel(logging.WARNING)
+
 class OllamaNegotiator(NegotiatorBase):
     """Ollama model wrapped as a ParlAI negotiation agent."""
     
@@ -91,6 +95,7 @@ class OllamaNegotiator(NegotiatorBase):
         
         # Two-part response configuration
         self.use_two_part_response = opt.get('use_two_part_response', USE_TWO_PART_RESPONSE)
+        logger.info(f"OllamaNegotiator initialized with use_two_part_response={self.use_two_part_response}")
         self.strategy_temperature = opt.get('strategy_temperature', STRATEGY_TEMPERATURE)
         self.strategy_max_tokens = opt.get('strategy_max_tokens', STRATEGY_MAX_TOKENS)
         self.response_max_tokens = opt.get('response_max_tokens', RESPONSE_MAX_TOKENS)
@@ -248,20 +253,20 @@ class OllamaNegotiator(NegotiatorBase):
                 return text, int(prompt_tokens), int(output_tokens)
             else:
                 logger.error(f"Ollama API error: HTTP {response.status_code}")
-                fallback = "[PROPOSE] I'm having technical difficulties. Let's continue negotiating."
+                fallback = "I'm having technical difficulties. Let's continue negotiating."
                 return fallback, 0, len(fallback.split())
                 
         except requests.exceptions.Timeout:
             logger.error(f"Ollama request timed out after {self.timeout} seconds")
-            fallback = "[PROPOSE] Let me think about that offer."
+            fallback = "Let me think about that offer."
             return fallback, 0, len(fallback.split())
         except requests.exceptions.RequestException as e:
             logger.error(f"Ollama API error: {e}")
-            fallback = "[PROPOSE] Let's continue with the negotiation."
+            fallback = "Let's continue with the negotiation."
             return fallback, 0, len(fallback.split())
         except Exception as e:
             logger.error(f"Unexpected error: {e}")
-            fallback = "[PROPOSE] I need to reconsider."
+            fallback = "I need to reconsider."
             return fallback, 0, len(fallback.split())
     
     def generate_strategy(self) -> Dict[str, Any]:
@@ -377,10 +382,10 @@ class OllamaNegotiator(NegotiatorBase):
             # Phase 1: Generate strategy
             strategy = self.generate_strategy()
             self.current_strategy = strategy
-            
+
             # Phase 2: Generate response based on strategy
             response = self.generate_response(strategy)
-            
+
             # Parse action from strategy (more reliable than parsing from text)
             action_str = strategy.get('action_indicator', 'PROPOSE')
             action = None
@@ -389,18 +394,43 @@ class OllamaNegotiator(NegotiatorBase):
                     action = act
                     break
         else:
-            # Legacy single-step generation - generate strategy then response
-            strategy = self.generate_strategy()
-            self.current_strategy = strategy
-            response = self.generate_response(strategy)
-            
-            # Parse action from strategy
-            action_str = strategy.get('action_indicator', 'PROPOSE')
-            action = None
-            for act in NegotiationAction:
-                if act.value == f"[{action_str}]":
-                    action = act
-                    break
+            # Direct generation without strategy
+            # Pass None strategy to dialogue flow manager
+            self.current_strategy = None
+
+            # Build context for dialogue flow manager (without strategy)
+            context = {
+                'side': self.side if self.side else "negotiator",
+                'state': self.current_state,
+                'history': self.negotiation_history[-5:] if self.negotiation_history else [],
+                'dialogue_id': getattr(self, 'dialogue_id', 'unknown'),
+                'turn': self.turn_count,
+                'role_state': self.role_state  # Pass role state for target price
+            }
+
+            # Use dialogue flow manager with None strategy
+            prompt = self.dialogue_flow.generate_response_prompt(None, 'PROPOSE', context)
+
+            start_time = time.time()
+            response_text, prompt_tokens, output_tokens = self._generate_response(
+                prompt,
+                temperature=self.temperature,
+                max_tokens=self.response_max_tokens
+            )
+            duration_ms = (time.time() - start_time) * 1000
+
+            # Track metrics
+            self.token_metrics.track_response_generation(
+                prompt_tokens, output_tokens, duration_ms
+            )
+
+            response = response_text
+
+            # Parse action from response text
+            action, _ = self.parse_negotiation_action(response)
+            if action is None:
+                action = NegotiationAction.PROPOSE
+            action_str = action.value.strip('[]')
         
         # Update our state
         if action:

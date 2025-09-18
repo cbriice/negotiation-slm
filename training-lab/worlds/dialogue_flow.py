@@ -54,18 +54,18 @@ class DialogueFlowManager:
         valid_actions = ['PROPOSE', 'COMMIT', 'ACK', 'NACK', 'NO_DEAL']
         return action in valid_actions
     
-    def generate_response_prompt(self, 
-                                strategy: Dict[str, Any],
+    def generate_response_prompt(self,
+                                strategy: Optional[Dict[str, Any]],
                                 action: str,
                                 context: Dict[str, Any]) -> str:
         """
         Generate action-specific prompt for response generation.
-        
+
         Args:
-            strategy: Complete strategy JSON
+            strategy: Complete strategy JSON (None for direct generation)
             action: Extracted action indicator
             context: Negotiation context (state, history, etc.)
-            
+
         Returns:
             Formatted prompt for response generation
         """
@@ -96,19 +96,23 @@ class DialogueFlowManager:
 class ActionPromptGenerator:
     """Generates action-specific prompts for response generation."""
     
-    def generate_prompt(self, action: str, strategy: Dict[str, Any], 
+    def generate_prompt(self, action: str, strategy: Optional[Dict[str, Any]],
                        context: Dict[str, Any]) -> str:
         """
         Generate prompt based on action type.
-        
+
         Args:
             action: Action indicator (PROPOSE, COMMIT, etc.)
-            strategy: Complete strategy JSON
+            strategy: Complete strategy JSON (None for direct generation)
             context: Negotiation context
-            
+
         Returns:
             Action-specific prompt
         """
+        # Handle direct generation without strategy
+        if strategy is None:
+            return self._direct_prompt(action, context)
+
         if action == 'PROPOSE':
             return self._propose_prompt(strategy, context)
         elif action == 'COMMIT':
@@ -122,7 +126,46 @@ class ActionPromptGenerator:
         else:
             # Fallback to generic prompt
             return self._generic_prompt(strategy, context)
-    
+
+    def _direct_prompt(self, action: str, context: Dict[str, Any]) -> str:
+        """Generate direct prompt without strategy (for use_two_part_response=False)."""
+        side = context.get('side', 'negotiator')
+        role_state = context.get('role_state', {})
+        state = context.get('state', {})
+        history = context.get('history', [])
+
+        # Get target price based on role
+        if side == 'buyer':
+            target_price = role_state.get('target_price', 850)
+        else:  # seller
+            target_price = role_state.get('min_price', 900)
+
+        # Get item info
+        item_name = 'the item'
+        if state and 'item' in state:
+            item_name = state['item'].get('name', 'the item')
+
+        # Get partner's last message if available
+        partner_msg = ""
+        if history:
+            for entry in reversed(history):
+                if not entry.get('is_self', False):
+                    partner_msg = entry.get('text', '')
+                    break
+
+        # Build simple, concise prompt
+        prompt_parts = [
+            f"You are a {side} negotiating for {item_name}.",
+            f"Your target price is ${target_price}."
+        ]
+
+        if partner_msg:
+            prompt_parts.append(f"\nPartner's last message: \"{partner_msg}\"")
+
+        prompt_parts.append(f"\nMake a negotiation offer or response.")
+
+        return "\n".join(prompt_parts)
+
     def _propose_prompt(self, strategy: Dict[str, Any], context: Dict[str, Any]) -> str:
         """Generate PROPOSE action prompt."""
         side = context.get('side', 'negotiator')

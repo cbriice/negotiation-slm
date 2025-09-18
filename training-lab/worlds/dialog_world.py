@@ -107,9 +107,9 @@ class DialogPartnerWorld(World):
         )
         group.add_argument(
             '--use-two-part-response',
-            type=bool,
+            type=lambda x: x.lower() in ['true', '1', 'yes'],
             default=USE_TWO_PART_RESPONSE,
-            help='Use two-part strategy/response generation'
+            help='Use two-part strategy/response generation. Accepts: true/false, 1/0, yes/no'
         )
         group.add_argument(
             '--enforce-strict-protocol',
@@ -339,21 +339,19 @@ class DialogPartnerWorld(World):
         other_agent = self.partner if agent_side == 'buyer' else self.negotiator
         logger.debug(f"Opening speaker: {type(opening_speaker).__name__} as buyer")
         
-        # Generate opening with two-part flow if enabled
+        # Generate opening - act() method handles two-part logic internally
         logger.debug(f"Generating opening with two_part={self.use_two_part}")
-        if self.use_two_part:
-            strategy, opening_text = self._process_agent_strategy_response(opening_speaker)
-            logger.debug(f"Opening generated: {opening_text[:100]}..." if opening_text else "No text generated")
-            if strategy is not None:
-                episode['strategies'].append({
-                    'turn': 0,
-                    'speaker': 'buyer',  # Opening speaker is always buyer
-                    'strategy': strategy
-                })
-        else:
-            # Direct generation for partner or non-two-part mode
-            response = opening_speaker.act()
-            opening_text = response.get('text', '')
+        response = opening_speaker.act()
+        opening_text = response.get('text', '')
+        logger.debug(f"Opening generated: {opening_text[:100]}..." if opening_text else "No text generated")
+
+        # If two-part response is enabled and strategy was generated, save it
+        if self.use_two_part and response.get('strategy'):
+            episode['strategies'].append({
+                'turn': 0,
+                'speaker': 'buyer',  # Opening speaker is always buyer
+                'strategy': response.get('strategy')
+            })
         
         episode['dialogue'].append({
             'turn': 0,
@@ -382,23 +380,18 @@ class DialogPartnerWorld(World):
             other_agent = self.partner if current_is_negotiator else self.negotiator
             speaker = agent_side if current_is_negotiator else partner_side
             
-            # Generate response with two-part flow for negotiator
-            if current_is_negotiator and self.use_two_part:
-                strategy, text = self._process_agent_strategy_response(current_agent)
-                
-                if strategy is not None:
-                    episode['strategies'].append({
-                        'turn': turn,
-                        'speaker': speaker,
-                        'strategy': strategy
-                    })
-                
-                episode_done = self._check_episode_done(text, current_agent)
-            else:
-                # Direct generation for partner
-                response = current_agent.act()
-                text = response.get('text', '')
-                episode_done = response.get('episode_done', False)
+            # Generate response - act() method handles two-part logic internally
+            response = current_agent.act()
+            text = response.get('text', '')
+            episode_done = response.get('episode_done', False)
+
+            # If two-part response is enabled and strategy was generated, save it
+            if self.use_two_part and current_is_negotiator and response.get('strategy'):
+                episode['strategies'].append({
+                    'turn': turn,
+                    'speaker': speaker,
+                    'strategy': response.get('strategy')
+                })
             
             # Log turn
             turn_entry = {

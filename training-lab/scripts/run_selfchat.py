@@ -72,7 +72,14 @@ class SelfChatRunner(ParlaiScript):
             action='store_true',
             help='Enable debug logging'
         )
-        
+
+        parser.add_argument(
+            '--use-two-part-response',
+            type=lambda x: x.lower() in ['true', '1', 'yes'],
+            default=True,
+            help='Enable two-part response generation (strategy then response). Accepts: true/false, 1/0, yes/no'
+        )
+
         return parser
     
     def run(self):
@@ -96,6 +103,7 @@ class SelfChatRunner(ParlaiScript):
         logger.info(f"Model: {opt.get('model_name', 'mistral:7b')}")
         if opt.get('model_checkpoint'):
             logger.info(f"LoRA checkpoint: {opt.get('model_checkpoint')}")
+        logger.info(f"Two-part response: {opt.get('use_two_part_response', True)}")
         logger.info("="*60 + "\n")
         
         # Initialize world variable
