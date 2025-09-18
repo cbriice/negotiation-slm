@@ -56,8 +56,8 @@ class SelfChatRunner(ParlaiScript):
         parser.add_argument(
             '--model-name',
             type=str,
-            default='mistralai/Mistral-7B-v0.1',
-            help='HuggingFace model name'
+            default='mistral:7b',
+            help='Ollama model name'
         )
         
         parser.add_argument(
@@ -93,7 +93,7 @@ class SelfChatRunner(ParlaiScript):
         logger.info(f"Target episodes: {opt.get('num_episodes', 1500)}")
         logger.info(f"Max turns per episode: {opt.get('max_turns', 20)}")
         logger.info(f"Output directory: {opt.get('output_dir', 'data/negotiations/selfchat/')}")
-        logger.info(f"Model: {opt.get('model_name', 'mistralai/Mistral-7B-v0.1')}")
+        logger.info(f"Model: {opt.get('model_name', 'mistral:7b')}")
         if opt.get('model_checkpoint'):
             logger.info(f"LoRA checkpoint: {opt.get('model_checkpoint')}")
         logger.info("="*60 + "\n")

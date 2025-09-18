@@ -11,7 +11,7 @@ from training_parameters import *
 class TrainingConfig:
     """Configuration for different training stages."""
     stage: str
-    model_name: str = "mistralai/Mistral-7B-v0.1"
+    model_name: str = "mistral:7b"
     output_dir: str = "./checkpoints"
     
     # Training hyperparameters (inherit from training_parameters.py)
