@@ -426,10 +426,9 @@ class OllamaNegotiator(NegotiatorBase):
 
             response = response_text
 
-            # Parse action from response text
-            action, _ = self.parse_negotiation_action(response)
-            if action is None:
-                action = NegotiationAction.PROPOSE
+            # For direct generation (no strategy), default to PROPOSE action
+            # Actions are backend metadata, not parsed from message text
+            action = NegotiationAction.PROPOSE
             action_str = action.value.strip('[]')
         
         # Update our state

@@ -180,7 +180,6 @@ def score_violation_severity(violation_type: str) -> int:
         'excessive_length': ViolationSeverity.LOW.value,
         'stalling': ViolationSeverity.LOW.value,
         'off_topic': ViolationSeverity.LOW.value,
-        'missing_action_tag': ViolationSeverity.LOW.value,
         
         # Warnings (1)
         'minor_format_issue': ViolationSeverity.WARNING.value,

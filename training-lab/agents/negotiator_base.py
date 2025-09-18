@@ -199,16 +199,18 @@ class NegotiatorBase(Agent):
         
         self.metrics['turns'] = self.turn_count
     
-    def check_protocol_violations(self, action: Optional[NegotiationAction], 
+    def check_protocol_violations(self, action: Optional[NegotiationAction],
                                  message: str) -> List[str]:
         """Check for protocol violations in the current turn."""
-        from utils.protocol_validator import check_terms_equivalence
-        
+        from utils.protocol_validator import check_terms_equivalence, check_for_leaked_tags
+
         violations = []
-        
-        # Check for missing action tag
-        if action is None and self.negotiation_state != NegotiationState.INITIALIZING:
-            violations.append("missing_action_tag")
+
+        # CRITICAL: Check for leaked action tags in message text
+        # Action tags should NEVER appear in messages - they are backend metadata only
+        has_leaked, found_tags = check_for_leaked_tags(message)
+        if has_leaked:
+            violations.append(f"tag_in_message: {found_tags}")
         
         # Check for invalid state transitions
         if action == NegotiationAction.COMMIT:
