@@ -19,14 +19,25 @@ from training.data_converter import DataConverter
 from training.sft_trainer import main as sft_main
 import training_parameters as params
 
-# Setup logging
+# Setup logging - ensure logs directory exists first
+Path('logs').mkdir(exist_ok=True)
+
+# Configure root logger to only use file handler
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.FileHandler('logs/baseline_training.log')
-    ]
+    ],
+    force=True  # Override any existing configuration
 )
+
+# Remove any existing console handlers that might have been added
+root_logger = logging.getLogger()
+for handler in root_logger.handlers[:]:
+    if isinstance(handler, logging.StreamHandler) and handler.stream in (sys.stdout, sys.stderr):
+        root_logger.removeHandler(handler)
+
 logger = logging.getLogger(__name__)
 
 
@@ -279,9 +290,6 @@ Example usage:
                        help='Export and convert data but skip training')
 
     args = parser.parse_args()
-
-    # Create necessary directories
-    Path('logs').mkdir(exist_ok=True)
 
     try:
         # Step 1: Export built-in tasks
