@@ -157,8 +157,8 @@ def calculate_epoch_fraction(sft_file: str,
     # If we only have dealnodeal, we'll do more epochs on it
     num_tasks = len(task_counts)
     if num_tasks == 1:
-        # Only dealnodeal - do full epoch instead of 0.5
-        total_epochs = 1.0
+        # ----------------------------------------------------------------- num epochs default config ----------------------------------------------------------------------
+        total_epochs = 0.5
     else:
         total_epochs = num_tasks * target_epochs_per_task
 

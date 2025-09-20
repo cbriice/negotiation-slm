@@ -8,7 +8,7 @@ PER_DEVICE_BATCH_SIZE: int = 1
 GRAD_ACCUM_STEPS: int = 8
 SEED: int = 42
 MODEL_TEMP: float = 0.5  # Temperature for model generation
-PACKING = True
+PACKING = True                                                  # ---- change this to False when using comprehensive datasets
 PAD_TO_MULTIPLE = 128
 
 # QLoRA quantization
@@ -31,6 +31,8 @@ USE_GRADIENT_CHECKPOINTING = "mlp_only"
 USE_FLASH_ATTENTION_2 = True       # Enable Flash Attention 2 by default
 
 # LoRA
+"""
+old defaults for heavy, domain-shifting training. too strong for baseline task style training - use with comprehensive, verified dataset
 R: int = 96
 ALPHA: int = 256
 DROPOUT: float = 0.05
@@ -38,19 +40,26 @@ TARGET_MODULES = [
     "q_proj", "k_proj", "v_proj", "o_proj",
     "gate_proj", "up_proj", "down_proj"
 ]
+"""
+# LoRA config for baseline task training
+R: int = 16
+ALPHA: int = 32
+DROPOUT: float = 0.05
+TARGET_MODULES = ["q_proj", "k_proj", "v_proj", "o_proj"]
 
 # Trainer/runtime
 GRADIENT_CHECKPOINTING: bool = True
 OPTIM: str = "paged_adamw_8bit"
 BF16: bool = True                   # ok on Ampere/Ada; set False if you hit issues
 DEVICE_MAP: str = "auto"
-PACKING: bool = False               # True if your SFT examples are short & homogeneous
+# PACKING: bool = False               # True if your SFT examples are short & homogeneous
 
 # Save/log
 LOGGING_STEPS: int = 10
 SAVE_STEPS: int = 200
 SAVE_STRATEGY: str = "steps"
-EVAL_STRATEGY: str = "no"           # flip to "steps" if you add eval
+EVAL_STRATEGY: str = "steps"           # flip to "steps" if you add eval
+EVAL_STEPS = 100
 
 # SFT-specific
 SFT_MAX_STEPS: int = 1000
