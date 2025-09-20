@@ -10,6 +10,7 @@ from transformers import (
     BitsAndBytesConfig,
 )
 from peft.peft_model import PeftModel
+from torch.amp.autocast_mode import autocast
 
 from agents.negotiator_base import NegotiatorBase, NegotiationAction
 from agents.token_metrics import TokenMetrics
@@ -128,8 +129,14 @@ class OllamaNegotiator(NegotiatorBase):
         # Dialogue flow manager for prompt generation
         self.dialogue_flow = DialogueFlowManager()
         
-        # Set device
+        # Set device and optimize CUDA settings
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        if torch.cuda.is_available():
+            # Enable TF32 for better GPU utilization on Ampere+ GPUs
+            torch.backends.cuda.matmul.allow_tf32 = True
+            torch.backends.cudnn.allow_tf32 = True
+            # Set cudnn benchmark for consistent input sizes
+            torch.backends.cudnn.benchmark = True
         logger.info(f"Using device: {self.device}")
     
     def _load_hf_model(self):
@@ -169,9 +176,9 @@ class OllamaNegotiator(NegotiatorBase):
                 # Get total VRAM in bytes
                 total_memory = torch.cuda.get_device_properties(0).total_memory
                 # Use 85% for model, leave 15% for activations
-                usable_memory = int(total_memory * 0.85)
-                max_memory = {0: f"{usable_memory}B"}
-                logger.info(f"Setting max GPU memory to {usable_memory / 1024**3:.2f}GB (85% of total)")
+                usable_memory_gb = (total_memory * 0.85) / (1024**3)
+                max_memory = {0: f"{usable_memory_gb:.2f}GB"}
+                logger.info(f"Setting max GPU memory to {usable_memory_gb:.2f}GB (85% of total)")
             else:
                 max_memory = None
 
@@ -197,12 +204,18 @@ class OllamaNegotiator(NegotiatorBase):
                         torch_dtype=torch.bfloat16,
                     )
                     logger.info("LoRA adapter loaded successfully")
+
+                    # Verify Flash Attention persists through PEFT
+                    if hasattr(self.model, 'config'):
+                        if hasattr(self.model, 'base_model') and hasattr(self.model.base_model, 'config'):
+                            if hasattr(self.model.base_model.config, '_attn_implementation'):
+                                logger.info(f"Attention implementation after PEFT (base model): {self.model.base_model.config._attn_implementation}")
                 else:
                     logger.warning(f"Adapter path does not exist: {adapter_path}")
 
-            # Set model to eval mode
+            # Set model to eval mode for faster inference
             self.model.eval()
-            logger.info("Model loaded successfully")
+            logger.info("Model loaded successfully in eval mode")
 
         except Exception as e:
             logger.error(f"Failed to load model: {e}")
@@ -319,8 +332,8 @@ class OllamaNegotiator(NegotiatorBase):
             # Count prompt tokens
             prompt_tokens = inputs['input_ids'].shape[1]
 
-            # Generate with the model
-            with torch.no_grad():
+            # Generate with mixed precision for better GPU utilization
+            with autocast(device_type='cuda', dtype=torch.bfloat16):
                 outputs = self.model.generate(
                     **inputs,
                     max_new_tokens=max_tokens if max_tokens is not None else self.max_tokens,
@@ -329,6 +342,7 @@ class OllamaNegotiator(NegotiatorBase):
                     do_sample=True,
                     pad_token_id=self.tokenizer.pad_token_id,
                     eos_token_id=self.tokenizer.eos_token_id,
+                    use_cache=True,  # Enable KV cache for fast autoregressive decoding
                 )
 
             # Decode the response (only the new tokens)

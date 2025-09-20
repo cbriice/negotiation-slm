@@ -165,25 +165,27 @@ class SelfChatWorld(World):
     def _create_agents(self, opt: Opt) -> List[OllamaNegotiator]:
         """Create buyer and seller agents."""
         agents = []
-        
-        # Share model between agents for efficiency
-        shared = None
-        
+        shared = {}
+
+        # Share model between agents for better memory efficiency
+        # HF models can't truly parallelize on single GPU anyway
+
         for i, side in enumerate(['buyer', 'seller']):
             agent_opt = deepcopy(opt)
             agent_opt['id'] = f"negotiator_{side}"
-            
+
             if opt.get('model_checkpoint'):
                 agent_opt['lora_checkpoint'] = opt['model_checkpoint']
-            
+
+            # Share model between agents
             agent = OllamaNegotiator(agent_opt, shared)
             agent.side = side
             agents.append(agent)
-            
-            # Share model for next agent
+
+            # After first agent, share its model
             if i == 0:
                 shared = agent.share()
-        
+
         return agents
     
     def load_state_seeds(self) -> Tuple[List[Dict], List[Dict]]:
