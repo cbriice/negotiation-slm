@@ -93,12 +93,16 @@ class EpisodeLogger:
         
         # Build conversation history progressively
         conversation_history = []
-        
+
         for i, turn in enumerate(dialogue):
             # Skip if no response in this turn
             if 'response' not in turn and 'label' not in turn:
                 continue
-            
+
+            # Use provided conversation history if available, otherwise build it
+            if 'conversation_history' in turn:
+                conversation_history = turn['conversation_history']
+
             # Build input context
             input_packet = {
                 'state': state,
