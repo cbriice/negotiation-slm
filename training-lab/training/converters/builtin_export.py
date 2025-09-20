@@ -187,7 +187,18 @@ class BuiltinTaskExporter:
 
             # Process labels as agent responses
             if labels and labels[0] != '<selection>':
-                agent_response = self._sanitize_dialogue_text(labels[0])
+                agent_response = labels[0]
+
+                # Skip item allocation responses (these are backend-only)
+                if agent_response.startswith('item0=') or 'item1=' in agent_response or 'item2=' in agent_response:
+                    continue
+
+                # Sanitize the response
+                agent_response = self._sanitize_dialogue_text(agent_response)
+
+                # Skip empty responses
+                if not agent_response:
+                    continue
 
                 # Create dialogue turn with accumulated history
                 dialogue_turn = {
