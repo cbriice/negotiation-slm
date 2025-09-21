@@ -18,14 +18,15 @@ from transformers import (
     DataCollatorForLanguageModeling,
     TrainerCallback,
 )
-from trl import SFTTrainer, SFTConfig
+from trl import SFTTrainer, SFTConfig, DataCollatorForCompletionOnlyLM
 
 # Import existing QLoRA components
-from .model_loader import ModelLoader
-from .lora_config import LoRAConfigurator
-from .checkpoint_manager import CheckpointManager
-from .metrics_tracker import TrainingMetricsTracker
+from training.model_loader import ModelLoader
+from training.lora_config import LoRAConfigurator
+from training.checkpoint_manager import CheckpointManager
+from training.metrics_tracker import TrainingMetricsTracker
 from utils.dataset_loader import UnifiedDatasetLoader
+from utils.response_masking import ResponseMaskingHandler, ResponseMaskingConfig, MultiFormatResponseMasker
 import training_parameters as params
 
 # Import error handling modules
@@ -145,6 +146,9 @@ class SFTTrainingPipeline:
         self.metrics_tracker = None
         self.tb_writer = None
 
+        # Initialize response masking handler (will be set up after tokenizer is loaded)
+        self.response_masker = None
+
     def load_ndjson_dataset(self, file_path: str) -> Dataset:
         """
         Load and parse NDJSON file into HuggingFace Dataset.
@@ -200,6 +204,108 @@ class SFTTrainingPipeline:
 
         return preprocessed
 
+    def _validate_masking_on_sample(self, dataset: Dataset, data_collator) -> None:
+        """
+        Validate that response masking is working correctly on sample data.
+
+        Args:
+            dataset: Training dataset to sample from
+            data_collator: Data collator with response masking
+        """
+        if len(dataset) == 0:
+            logger.warning("Cannot validate masking on empty dataset")
+            return
+
+        # Safety check for tokenizer and response_masker
+        if not self.tokenizer or not self.response_masker:
+            logger.warning("Cannot validate masking - tokenizer or response_masker not initialized")
+            return
+
+        logger.info("="*60)
+        logger.info("Validating Response Masking Configuration")
+        logger.info("="*60)
+
+        # Take a few samples for validation
+        num_samples = min(3, len(dataset))
+        samples = dataset.select(range(num_samples))
+
+        total_masked = 0
+        total_supervised = 0
+        total_tokens = 0
+
+        for i in range(len(samples)):
+            # Get the text from dataset
+            example = samples[i]
+            text = example.get('text', '') if isinstance(example, dict) else ''
+            if not text:
+                continue
+
+            # Tokenize
+            tokenized = self.tokenizer(
+                text,
+                truncation=True,
+                padding=False,
+                max_length=params.MAX_SEQ_LEN,
+                return_tensors="pt"
+            )
+            input_ids = tokenized["input_ids"][0]
+
+            # Apply collator to get labels with masking
+            collated = data_collator([{"input_ids": input_ids}])
+            labels = collated["labels"][0]
+
+            # Calculate masking statistics
+            masked_count = (labels == params.MASKING_IGNORE_INDEX).sum().item()
+            supervised_count = (labels != params.MASKING_IGNORE_INDEX).sum().item()
+            token_count = len(labels)
+
+            total_masked += masked_count
+            total_supervised += supervised_count
+            total_tokens += token_count
+
+            masking_ratio = masked_count / token_count if token_count > 0 else 0
+
+            # Log sample statistics
+            logger.info(f"\nSample {i+1}:")
+            logger.info(f"  Total tokens: {token_count}")
+            logger.info(f"  Masked tokens (context): {masked_count} ({masking_ratio:.1%})")
+            logger.info(f"  Supervised tokens (response): {supervised_count} ({(1-masking_ratio):.1%})")
+
+            # Show preview of what's being supervised
+            if supervised_count > 0:
+                supervised_ids = input_ids[labels != params.MASKING_IGNORE_INDEX]
+                if len(supervised_ids) > 0:
+                    supervised_text = self.tokenizer.decode(supervised_ids, skip_special_tokens=True)
+                    preview_len = min(100, len(supervised_text))
+                    logger.info(f"  Supervised text preview: '{supervised_text[:preview_len]}...'")
+
+            # Detect format
+            format_name = self.response_masker.detect_format(text)
+            logger.info(f"  Detected format: {format_name}")
+
+        # Calculate overall statistics
+        if total_tokens > 0:
+            overall_masking_ratio = total_masked / total_tokens
+            overall_supervision_ratio = total_supervised / total_tokens
+
+            logger.info("\n" + "="*60)
+            logger.info("Overall Masking Statistics:")
+            logger.info(f"  Total tokens: {total_tokens}")
+            logger.info(f"  Total masked: {total_masked} ({overall_masking_ratio:.1%})")
+            logger.info(f"  Total supervised: {total_supervised} ({overall_supervision_ratio:.1%})")
+
+            # Warnings for unusual masking ratios
+            if overall_supervision_ratio < 0.2:
+                logger.warning(f"⚠️  Low supervision ratio ({overall_supervision_ratio:.1%}) - may indicate incorrect response template detection")
+                logger.warning(f"   Check that response templates match your data format: {params.RESPONSE_TEMPLATES}")
+            elif overall_supervision_ratio > 0.8:
+                logger.warning(f"⚠️  High supervision ratio ({overall_supervision_ratio:.1%}) - may be training on context/prompts")
+                logger.warning(f"   Verify response templates are correctly configured")
+            else:
+                logger.info(f"✓ Masking ratio looks reasonable ({overall_masking_ratio:.1%} masked, {overall_supervision_ratio:.1%} supervised)")
+
+        logger.info("="*60 + "\n")
+
     def setup_model(self, resume_from: Optional[str] = None):
         """
         Initialize model with QLoRA configuration.
@@ -245,6 +351,13 @@ class SFTTrainingPipeline:
         # Set model's pad_token_id to match tokenizer
         if hasattr(self.model, 'config'):
             self.model.config.pad_token_id = self.tokenizer.pad_token_id
+
+        # Initialize response masking handler
+        logger.info("Initializing response masking handler...")
+        self.response_masker = MultiFormatResponseMasker(self.tokenizer)
+        logger.info("Response masking handler initialized for multi-format training")
+        logger.info(f"Response templates: {params.RESPONSE_TEMPLATES}")
+        logger.info(f"Instruction templates: {params.INSTRUCTION_TEMPLATES}")
 
         # Log model info
         trainable_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
@@ -330,15 +443,20 @@ class SFTTrainingPipeline:
             dataset_text_field="text",
         )
 
-        # Initialize SFTTrainer
+        # Create data collator for response-only training
+        # This ensures loss is only computed on response portions
+        logger.info("Creating response-only data collator...")
+        data_collator = self.response_masker.create_adaptive_collator()
+
+        # Initialize SFTTrainer with response masking
         trainer = SFTTrainer(
             model=self.model,
             tokenizer=self.tokenizer,
             train_dataset=train_dataset,
             eval_dataset=eval_dataset,
             args=training_args,
-            # SFTTrainer will handle tokenization and data collation automatically
-            # when dataset_text_field is specified in training_args
+            data_collator=data_collator,  # Use response-only collator
+            # SFTTrainer will handle tokenization with our custom collator
         )
 
         logger.info("Training Configuration:")
@@ -355,6 +473,10 @@ class SFTTrainingPipeline:
         logger.info(f"  - Packing: {params.PACKING}")
         logger.info(f"  - Mixed precision: bf16={params.BF16}, fp16={not params.BF16}")
         logger.info(f"  - Gradient checkpointing: {params.GRADIENT_CHECKPOINTING}")
+        logger.info(f"  - Response masking: ENABLED (loss computed on responses only)")
+
+        # Validate masking on sample batch
+        self._validate_masking_on_sample(train_dataset, data_collator)
 
         # Add callback for logging and error handling
         class ErrorHandlingCallback(TrainerCallback):
@@ -547,11 +669,7 @@ class SFTTrainingPipeline:
                         train_dataset=train_dataset,
                         eval_dataset=eval_dataset,
                         args=training_args,
-                        data_collator=DataCollatorForLanguageModeling(
-                            tokenizer=self.tokenizer,
-                            mlm=False,
-                            pad_to_multiple_of=8,
-                        ),
+                        data_collator=data_collator,  # Use the response masking collator
                     )
                     train_result = trainer.train()
                 else:

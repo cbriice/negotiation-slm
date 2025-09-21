@@ -80,3 +80,20 @@ USE_TWO_PART_RESPONSE: bool = True
 STRATEGY_MAX_TOKENS: int = 150
 RESPONSE_MAX_TOKENS: int = 256
 STRATEGY_TEMPERATURE: float = 0.3  # Lower temp for strategy generation
+
+# Response masking configuration (always enabled - loss computed only on responses)
+RESPONSE_TEMPLATES = [
+    "### Response:\n",
+    "### Response:",
+    "Assistant:",
+    "You:",
+    "Agent:",
+]
+INSTRUCTION_TEMPLATES = [
+    "### Instruction:\n",
+    "### Context:\n",
+    "User:",
+    "Partner:",
+    "State:",
+]
+MASKING_IGNORE_INDEX: int = -100  # Token ID for masked positions in loss calculation
