@@ -165,6 +165,7 @@ def get_latest_adapter_path() -> Optional[Path]:
         # Find all adapter files (both .bin and .safetensors) with their modification times
         for stage_dir in checkpoints_dir.iterdir():
             if stage_dir.is_dir():
+                # First check checkpoint-* subdirectories (more specific)
                 for checkpoint_dir in stage_dir.glob('checkpoint-*'):
                     # Check for both .bin and .safetensors formats
                     for adapter_name in ['adapter_model.bin', 'adapter_model.safetensors']:
@@ -172,6 +173,13 @@ def get_latest_adapter_path() -> Optional[Path]:
                         if adapter_file.exists():
                             adapter_files.append((adapter_file.stat().st_mtime, checkpoint_dir))
                             break  # Found an adapter in this checkpoint, no need to check other formats
+
+                # Then check if adapter is directly in stage directory (e.g., baseline/)
+                for adapter_name in ['adapter_model.bin', 'adapter_model.safetensors']:
+                    adapter_file = stage_dir / adapter_name
+                    if adapter_file.exists():
+                        adapter_files.append((adapter_file.stat().st_mtime, stage_dir))
+                        break  # Found an adapter, no need to check other formats
 
     if adapter_files:
         # Return the checkpoint directory with the most recent adapter

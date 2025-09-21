@@ -27,7 +27,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('logs/baseline_training.log')
+        logging.FileHandler('logs/baseline_training.log', mode='w')
     ],
     force=True  # Override any existing configuration
 )
@@ -158,7 +158,7 @@ def calculate_epoch_fraction(sft_file: str,
     num_tasks = len(task_counts)
     if num_tasks == 1:
         # ----------------------------------------------------------------- num epochs default config ----------------------------------------------------------------------
-        total_epochs = 0.5
+        total_epochs = 0.3
     else:
         total_epochs = num_tasks * target_epochs_per_task
 

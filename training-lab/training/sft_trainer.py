@@ -449,8 +449,8 @@ class SFTTrainingPipeline:
                                         severity="error" if action == "restore_checkpoint" else "warning"
                                     )
 
-            def on_step_end(self, args, state, control, **kwargs):
-                """Check gradients after each training step."""
+            def on_before_optimizer_step(self, args, state, control, **kwargs):
+                """Check gradients before optimizer step when they're available."""
                 if self.error_handling_enabled and self.parent.gradient_monitor:
                     model = kwargs.get('model', self.parent.model)
                     if model:
@@ -459,6 +459,10 @@ class SFTTrainingPipeline:
                             logger.warning(f"Unhealthy gradients detected at step {state.global_step}")
                             # Apply adaptive gradient clipping
                             self.parent.gradient_monitor.clip_gradients(model)
+
+            def on_step_end(self, args, state, control, **kwargs):
+                """Handle post-step operations."""
+                # Gradients are now checked in on_before_optimizer_step
 
                 # Save state periodically for recovery
                 if self.error_handling_enabled and self.parent.state_manager:

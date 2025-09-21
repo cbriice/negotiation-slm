@@ -1,7 +1,7 @@
 import logging
 import json
 import time
-from typing import Optional, Tuple, Dict, Any
+from typing import Optional, Tuple, Dict, Any, List
 from pathlib import Path
 import torch
 from transformers import (
@@ -183,6 +183,7 @@ class OllamaNegotiator(NegotiatorBase):
                 max_memory = None
 
             # Load base model with quantization and Flash Attention 2
+            logger.info("Loading base model with Flash Attention 2...")
             self.model = AutoModelForCausalLM.from_pretrained(
                 self.model_name,
                 quantization_config=bnb_config,
@@ -192,6 +193,12 @@ class OllamaNegotiator(NegotiatorBase):
                 torch_dtype=torch.bfloat16,
                 attn_implementation="flash_attention_2",  # Enable Flash Attention 2
             )
+
+            # Verify Flash Attention 2 is active on base model
+            if hasattr(self.model, 'config') and hasattr(self.model.config, '_attn_implementation'):
+                logger.info(f"✓ Base model loaded with attention: '{self.model.config._attn_implementation}'")
+            else:
+                logger.info("Base model loaded (FA2 status cannot be verified from config)")
 
             # Load LoRA adapter if provided
             if self.adapter_path:
@@ -206,10 +213,23 @@ class OllamaNegotiator(NegotiatorBase):
                     logger.info("LoRA adapter loaded successfully")
 
                     # Verify Flash Attention persists through PEFT
+                    logger.info("Verifying Flash Attention 2 configuration after PEFT loading...")
+
+                    # Try to find the config in the PEFT model structure
+                    config = None
                     if hasattr(self.model, 'config'):
-                        if hasattr(self.model, 'base_model') and hasattr(self.model.base_model, 'config'):
-                            if hasattr(self.model.base_model.config, '_attn_implementation'):
-                                logger.info(f"Attention implementation after PEFT (base model): {self.model.base_model.config._attn_implementation}")
+                        config = self.model.config
+                    elif hasattr(self.model, 'base_model') and hasattr(self.model.base_model, 'config'):
+                        config = self.model.base_model.config
+
+                    if config and hasattr(config, '_attn_implementation'):
+                        logger.info(f"✓ FA2 Status: Attention implementation = '{config._attn_implementation}'")
+                        if config._attn_implementation == "flash_attention_2":
+                            logger.info("✓ Flash Attention 2 is ACTIVE after PEFT loading")
+                        else:
+                            logger.warning(f"⚠ Flash Attention 2 NOT active. Current: {config._attn_implementation}")
+                    else:
+                        logger.warning("⚠ Could not verify attention implementation after PEFT loading")
                 else:
                     logger.warning(f"Adapter path does not exist: {adapter_path}")
 
@@ -365,6 +385,82 @@ class OllamaNegotiator(NegotiatorBase):
             logger.error(f"Error generating response: {e}")
             fallback = "Let's continue with the negotiation."
             return fallback, 0, len(self.tokenizer.encode(fallback))
+
+    def _batch_generate(self, prompts: List[str], temperature: Optional[float] = None,
+                       max_tokens: Optional[int] = None) -> List[str]:
+        """
+        Generate responses for multiple prompts in parallel batch.
+        Maximizes GPU utilization by processing all prompts together.
+        """
+        if not prompts:
+            return []
+
+        try:
+            # Add system prompt if provided
+            if self.system_prompt:
+                prompts = [f"{self.system_prompt}\n\n{p}" for p in prompts]
+
+            # Batch tokenize all prompts at once
+            inputs = self.tokenizer(
+                prompts,
+                return_tensors="pt",
+                truncation=True,
+                max_length=2048,
+                padding=True,  # Pad to same length for batching
+            ).to(self.device)
+
+            # Track input lengths for proper decoding
+            input_lengths = inputs['attention_mask'].sum(dim=1)
+
+            # Batch generate with mixed precision
+            with autocast(device_type='cuda', dtype=torch.bfloat16):
+                outputs = self.model.generate(
+                    **inputs,
+                    max_new_tokens=max_tokens if max_tokens is not None else self.max_tokens,
+                    temperature=temperature if temperature is not None else self.temperature,
+                    top_p=self.top_p,
+                    do_sample=True,
+                    pad_token_id=self.tokenizer.pad_token_id,
+                    eos_token_id=self.tokenizer.eos_token_id,
+                    use_cache=True,
+                )
+
+            # Decode all outputs in parallel
+            responses = []
+            for i in range(len(prompts)):
+                # Extract only generated tokens
+                generated_tokens = outputs[i][input_lengths[i]:]
+                response = self.tokenizer.decode(generated_tokens, skip_special_tokens=True)
+                responses.append(response.strip())
+
+            return responses
+
+        except torch.cuda.OutOfMemoryError:
+            logger.error("GPU OOM in batch generation. Falling back to sequential.")
+            torch.cuda.empty_cache()
+            # Fallback to sequential processing
+            responses = []
+            for prompt in prompts:
+                response, _, _ = self._generate_response(prompt, temperature, max_tokens)
+                responses.append(response)
+            return responses
+        except Exception as e:
+            logger.error(f"Error in batch generation: {e}")
+            # Return fallback responses
+            return ["Let's continue negotiating." for _ in prompts]
+
+    def _parse_strategy_json(self, text: str) -> Dict[str, Any]:
+        """Parse JSON strategy from text."""
+        try:
+            # Extract JSON from response
+            if '{' in text and '}' in text:
+                start = text.index('{')
+                end = text.rindex('}') + 1
+                json_str = text[start:end]
+                return json.loads(json_str)
+            return json.loads(text)
+        except:
+            return self._get_default_strategy()
     
     def generate_strategy(self) -> Dict[str, Any]:
         """Generate a negotiation strategy using internal prompt generation."""
@@ -563,12 +659,94 @@ class OllamaNegotiator(NegotiatorBase):
         }
     
     def batch_act(self, observations):
-        """Handle batch inference for multiple conversations."""
-        # Process sequentially - Ollama doesn't support true batching
-        responses = []
+        """Handle TRUE batch inference for multiple conversations."""
+        if not observations:
+            return []
+
+        batch_size = len(observations)
+
+        # Process all observations first
         for obs in observations:
             self.observe(obs)
-            responses.append(self.act())
+
+        if self.use_two_part_response:
+            # Phase 1: Batch generate strategies for ALL conversations
+            strategy_prompts = []
+            for _ in range(batch_size):
+                strategy_prompts.append(self._build_strategy_prompt())
+
+            # Batch tokenize and generate strategies in parallel
+            strategies_texts = self._batch_generate(
+                strategy_prompts,
+                temperature=self.strategy_temperature,
+                max_tokens=self.strategy_max_tokens
+            )
+
+            # Parse strategies
+            strategies = []
+            for text in strategies_texts:
+                try:
+                    strategy = self._parse_strategy_json(text)
+                    strategies.append(strategy)
+                except:
+                    strategies.append(self._get_default_strategy())
+
+            # Phase 2: Batch generate responses based on strategies
+            response_prompts = []
+            for strategy in strategies:
+                response_prompts.append(self._build_response_prompt(strategy))
+
+            responses_texts = self._batch_generate(
+                response_prompts,
+                temperature=self.temperature,
+                max_tokens=self.response_max_tokens
+            )
+
+            # Build final responses
+            responses = []
+            for i, (strategy, response_text) in enumerate(zip(strategies, responses_texts)):
+                action_str = strategy.get('action_indicator', 'PROPOSE')
+                responses.append({
+                    'id': self.id,
+                    'text': response_text,
+                    'episode_done': False,
+                    'strategy': strategy,
+                    'backend_tag': action_str,
+                    'action_tag': action_str
+                })
+        else:
+            # Direct batch generation without strategies
+            prompts = []
+            for _ in range(batch_size):
+                context = {
+                    'side': self.side if self.side else "negotiator",
+                    'state': self.current_state,
+                    'history': self.negotiation_history[-5:] if self.negotiation_history else [],
+                    'dialogue_id': getattr(self, 'dialogue_id', 'unknown'),
+                    'turn': self.turn_count,
+                    'role_state': self.role_state
+                }
+                prompt = self.dialogue_flow.generate_response_prompt(None, 'PROPOSE', context)
+                prompts.append(prompt)
+
+            # Batch generate all responses
+            responses_texts = self._batch_generate(
+                prompts,
+                temperature=self.temperature,
+                max_tokens=self.response_max_tokens
+            )
+
+            # Build responses
+            responses = []
+            for response_text in responses_texts:
+                responses.append({
+                    'id': self.id,
+                    'text': response_text,
+                    'episode_done': False,
+                    'backend_tag': 'PROPOSE',
+                    'action_tag': 'PROPOSE'
+                })
+
         return responses
     
     def share(self):

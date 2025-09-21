@@ -98,12 +98,25 @@ class SelfChatWorld(World):
             default=50,
             help='Save metrics after this many episodes'
         )
+        group.add_argument(
+            '--parallel-episodes',
+            type=int,
+            default=4,
+            help='Number of episodes to process in parallel (for GPU efficiency)'
+        )
+        group.add_argument(
+            '--use-batch-inference',
+            type=str,
+            default='True',
+            choices=['True', 'False', 'true', 'false'],
+            help='Use batch inference for parallel episodes'
+        )
         return parser
     
     def __init__(self, opt: Opt, agents=None, shared=None):
         """Initialize the SelfChatWorld."""
         super().__init__(opt)
-        
+
         # Configuration
         self.target_episodes = opt.get('num_episodes', 1500)
         self.batch_size = opt.get('batch_size', 100)
@@ -112,6 +125,12 @@ class SelfChatWorld(World):
         self.max_turns = opt.get('max_turns', 20)
         self.output_dir = Path(opt.get('output_dir', 'data/negotiations/selfchat/'))
         self.save_metrics_every = opt.get('save_metrics_every', 50)
+
+        # Parallel processing configuration
+        self.parallel_episodes = opt.get('parallel_episodes', 4)  # Process 4 episodes in parallel
+        # Parse string boolean for batch inference
+        batch_inference_str = opt.get('use_batch_inference', 'True')
+        self.use_batch_inference = batch_inference_str.lower() == 'true'
         
         # Create output directories with timestamped transcripts folder
         self.episodes_dir = self.output_dir / 'episodes'
@@ -436,78 +455,326 @@ class SelfChatWorld(World):
         
         return episode
     
+    def run_parallel_episodes(self, num_episodes: int) -> List[Dict[str, Any]]:
+        """
+        Run multiple episodes in parallel using batch inference.
+        This maximizes GPU utilization by processing multiple conversations simultaneously.
+        """
+        parallel_episodes = []
+        episode_states = []
+
+        # Initialize multiple episodes
+        for i in range(num_episodes):
+            if self.episode_count >= self.target_episodes:
+                break
+
+            # Select seed for each episode
+            seed, is_regression, was_mutated = self._select_seed()
+
+            # Initialize episode structure
+            episode = {
+                'episode_id': f"selfchat_ep_{self.episode_count + i:04d}",
+                'dialogue_id': f"selfchat_d_{self.episode_count + i:04d}",
+                'seed_id': f"seed_{self.active_seed_idx:03d}",
+                'state': seed,
+                'dialogue': [],
+                'metrics': {},
+                'meta': {
+                    'model_version': 'mistral-7b-v0.1',
+                    'lora_checkpoint': self.opt.get('model_checkpoint'),
+                    'temperature': self.opt.get('temperature', MODEL_TEMP),
+                    'is_regression_seed': is_regression,
+                    'was_mutated': was_mutated,
+                    'batch_id': f"batch_{self.current_batch:03d}",
+                    'session_id': self.session_metrics['session_id']
+                }
+            }
+
+            # Track episode state for parallel processing
+            episode_state = {
+                'episode': episode,
+                'seed': seed,
+                'turn': 0,
+                'done': False,
+                'buyer_history': [],
+                'seller_history': []
+            }
+
+            parallel_episodes.append(episode)
+            episode_states.append(episode_state)
+
+        # Process all episodes in parallel for each turn
+        for turn in range(self.max_turns):
+            active_states = [s for s in episode_states if not s['done']]
+            if not active_states:
+                break
+
+            # Collect prompts for batch processing
+            buyer_prompts = []
+            seller_prompts = []
+
+            for state in active_states:
+                # Build prompts for buyer and seller
+                seed = state['seed']
+
+                # Buyer prompt
+                buyer_prompt = self._build_parallel_prompt(
+                    seed, 'buyer', state['buyer_history'], turn
+                )
+                buyer_prompts.append(buyer_prompt)
+
+                # Seller prompt
+                seller_prompt = self._build_parallel_prompt(
+                    seed, 'seller', state['seller_history'], turn
+                )
+                seller_prompts.append(seller_prompt)
+
+            # Batch generate responses for all active episodes
+            if self.use_batch_inference and hasattr(self.agents[0], '_batch_generate'):
+                # Use batch inference for maximum GPU efficiency
+                all_prompts = buyer_prompts + seller_prompts
+                all_responses = self.agents[0]._batch_generate(
+                    all_prompts,
+                    temperature=self.opt.get('temperature', MODEL_TEMP),
+                    max_tokens=256
+                )
+
+                buyer_responses = all_responses[:len(buyer_prompts)]
+                seller_responses = all_responses[len(buyer_prompts):]
+            else:
+                # Fallback to sequential generation
+                buyer_responses = []
+                seller_responses = []
+                for prompt in buyer_prompts:
+                    response, _, _ = self.agents[0]._generate_response(prompt)
+                    buyer_responses.append(response)
+                for prompt in seller_prompts:
+                    response, _, _ = self.agents[1]._generate_response(prompt)
+                    seller_responses.append(response)
+
+            # Update episode states with responses
+            for i, state in enumerate(active_states):
+                buyer_text = buyer_responses[i]
+                seller_text = seller_responses[i]
+
+                # Add to dialogue
+                state['episode']['dialogue'].append({
+                    'turn': turn * 2,
+                    'speaker': 'buyer',
+                    'text': buyer_text,
+                    'action': 'PROPOSE',
+                    'tokens': len(buyer_text.split()),
+                    'timestamp': datetime.now().isoformat()
+                })
+
+                state['episode']['dialogue'].append({
+                    'turn': turn * 2 + 1,
+                    'speaker': 'seller',
+                    'text': seller_text,
+                    'action': 'PROPOSE',
+                    'tokens': len(seller_text.split()),
+                    'timestamp': datetime.now().isoformat()
+                })
+
+                # Update histories
+                state['buyer_history'].append(buyer_text)
+                state['seller_history'].append(seller_text)
+
+                # Check if episode is done
+                if self._check_parallel_episode_done(buyer_text, seller_text, turn):
+                    state['done'] = True
+
+        # Finalize episodes
+        completed_episodes = []
+        for state in episode_states:
+            episode = state['episode']
+            self._finalize_parallel_episode(episode)
+            completed_episodes.append(episode)
+
+        return completed_episodes
+
+    def _build_parallel_prompt(self, seed: Dict, side: str, history: List[str], turn: int) -> str:
+        """Build prompt for parallel episode processing."""
+        prompt_parts = []
+
+        # Role and context
+        prompt_parts.append(f"You are a {side} in a negotiation.")
+
+        # Item details
+        item = seed.get('item', {})
+        prompt_parts.append(f"Item: {item.get('name', 'Unknown')}")
+        prompt_parts.append(f"List Price: ${item.get('list_price', 0)}")
+
+        # Side-specific constraints
+        if side == 'buyer':
+            buyer_state = seed.get('buyer_state', {})
+            prompt_parts.append(f"Your maximum price: ${buyer_state.get('max_price', 0)}")
+            prompt_parts.append(f"Your target price: ${buyer_state.get('target_price', 0)}")
+        else:
+            seller_state = seed.get('seller_state', {})
+            prompt_parts.append(f"Your minimum price: ${seller_state.get('min_price', 0)}")
+
+        # Add history if available
+        if history:
+            prompt_parts.append("\nPrevious messages:")
+            for msg in history[-3:]:  # Last 3 messages
+                prompt_parts.append(f"- {msg}")
+
+        prompt_parts.append(f"\nGenerate your response for turn {turn + 1}:")
+
+        return "\n".join(prompt_parts)
+
+    def _check_parallel_episode_done(self, buyer_text: str, seller_text: str, turn: int) -> bool:
+        """Check if a parallel episode should end."""
+        # Check for deal keywords
+        combined_text = (buyer_text + " " + seller_text).lower()
+        if any(word in combined_text for word in ['deal accepted', 'agreed', 'no deal']):
+            return True
+
+        # Check turn limit
+        if turn >= self.max_turns - 1:
+            return True
+
+        return False
+
+    def _finalize_parallel_episode(self, episode: Dict):
+        """Finalize a parallel episode with metrics."""
+        dialogue = episode['dialogue']
+        total_turns = len(dialogue) // 2 if dialogue else 0
+
+        # Calculate simple metrics
+        episode['metrics'] = {
+            'turns': total_turns,
+            'deal_closed': False,  # Simplified for now
+            'final_price': None,
+            'terms_met_percentage': 0.0,
+            'buyer_tokens': sum(d['tokens'] for d in dialogue if d['speaker'] == 'buyer'),
+            'seller_tokens': sum(d['tokens'] for d in dialogue if d['speaker'] == 'seller'),
+            'total_tokens': sum(d['tokens'] for d in dialogue),
+            'protocol_violations': [],
+            'duration_seconds': 0,  # Would need timing
+            'tokens_per_second': 0
+        }
+
     def parley(self):
         """
-        Execute one episode of self-chat negotiation.
-        Override of ParlAI World method.
+        Execute episodes of self-chat negotiation.
+        Override of ParlAI World method to support parallel processing.
         """
         if self.episode_count >= self.target_episodes:
             return
-        
-        # Run episode
-        episode = self.run_episode()
-        
-        # Add to current batch
-        self.batch_episodes.append(episode)
-        
-        # Update session metrics DataFrame
-        episode_metrics = {
-            'episode_id': episode['episode_id'],
-            'dialogue_id': episode['dialogue_id'],
-            'seed_id': episode['seed_id'],
-            'turns': episode['metrics']['turns'],
-            'deal_closed': episode['metrics']['deal_closed'],
-            'final_price': episode['metrics']['final_price'],
-            'terms_met_percentage': episode['metrics']['terms_met_percentage'],
-            'buyer_tokens': episode['metrics']['buyer_tokens'],
-            'seller_tokens': episode['metrics']['seller_tokens'],
-            'total_tokens': episode['metrics']['total_tokens'],
-            'protocol_violations': len(episode['metrics']['protocol_violations']),
-            'duration_seconds': episode['metrics']['duration_seconds'],
-            'tokens_per_second': episode['metrics']['tokens_per_second'],
-            'is_regression_seed': episode['meta']['is_regression_seed'],
-            'was_mutated': episode['meta']['was_mutated'],
-            'batch_id': episode['meta']['batch_id'],
-            'timestamp': datetime.now().isoformat()
-        }
-        
-        # Append to DataFrame
-        self.session_metrics['episode_df'] = pd.concat([
-            self.session_metrics['episode_df'],
-            pd.DataFrame([episode_metrics])
-        ], ignore_index=True)
-        
-        # Track violations separately
-        if episode['metrics']['protocol_violations']:
-            for violation in episode['metrics']['protocol_violations']:
-                violation_record = {
+
+        if self.use_batch_inference and self.parallel_episodes > 1:
+            # Run multiple episodes in parallel
+            episodes_to_run = min(self.parallel_episodes, self.target_episodes - self.episode_count)
+            episodes = self.run_parallel_episodes(episodes_to_run)
+
+            # Process all completed episodes
+            for episode in episodes:
+                self.batch_episodes.append(episode)
+                self.log_episode(episode)
+
+                # Update session metrics DataFrame for each episode
+                episode_metrics = {
                     'episode_id': episode['episode_id'],
-                    'violation_type': violation,
+                    'dialogue_id': episode['dialogue_id'],
+                    'seed_id': episode['seed_id'],
+                    'turns': episode['metrics']['turns'],
+                    'deal_closed': episode['metrics']['deal_closed'],
+                    'final_price': episode['metrics']['final_price'],
+                    'terms_met_percentage': episode['metrics']['terms_met_percentage'],
+                    'buyer_tokens': episode['metrics']['buyer_tokens'],
+                    'seller_tokens': episode['metrics']['seller_tokens'],
+                    'total_tokens': episode['metrics']['total_tokens'],
+                    'protocol_violations': len(episode['metrics']['protocol_violations']),
+                    'duration_seconds': episode['metrics']['duration_seconds'],
+                    'tokens_per_second': episode['metrics']['tokens_per_second'],
+                    'is_regression_seed': episode['meta']['is_regression_seed'],
+                    'was_mutated': episode['meta']['was_mutated'],
+                    'batch_id': episode['meta']['batch_id'],
                     'timestamp': datetime.now().isoformat()
                 }
-                self.violations_df = pd.concat([
-                    self.violations_df,
-                    pd.DataFrame([violation_record])
+
+                # Append to DataFrame
+                self.session_metrics['episode_df'] = pd.concat([
+                    self.session_metrics['episode_df'],
+                    pd.DataFrame([episode_metrics])
                 ], ignore_index=True)
-        
-        # Log episode
-        self.log_episode(episode)
-        
-        # Save batch if full
-        if len(self.batch_episodes) >= self.batch_size:
-            self.save_batch()
-            self.batch_episodes = []
-            self.current_batch += 1
-        
-        # Save metrics periodically
-        if self.episode_count % self.save_metrics_every == 0:
-            self.save_session_metrics()
-        
-        self.episode_count += 1
-        
-        # Log progress
-        if self.episode_count % 10 == 0:
-            logger.info(f"Completed {self.episode_count}/{self.target_episodes} episodes")
+
+                self.episode_count += 1
+
+                # Save batch if full
+                if len(self.batch_episodes) >= self.batch_size:
+                    self.save_batch()
+                    self.batch_episodes = []
+                    self.current_batch += 1
+
+            # Save metrics periodically
+            if self.episode_count % self.save_metrics_every == 0:
+                self.save_session_metrics()
+        else:
+            # Original single episode logic
+            episode = self.run_episode()
+            self.batch_episodes.append(episode)
+
+            # Update session metrics DataFrame for single episode
+            episode_metrics = {
+                'episode_id': episode['episode_id'],
+                'dialogue_id': episode['dialogue_id'],
+                'seed_id': episode['seed_id'],
+                'turns': episode['metrics']['turns'],
+                'deal_closed': episode['metrics']['deal_closed'],
+                'final_price': episode['metrics']['final_price'],
+                'terms_met_percentage': episode['metrics']['terms_met_percentage'],
+                'buyer_tokens': episode['metrics']['buyer_tokens'],
+                'seller_tokens': episode['metrics']['seller_tokens'],
+                'total_tokens': episode['metrics']['total_tokens'],
+                'protocol_violations': len(episode['metrics']['protocol_violations']),
+                'duration_seconds': episode['metrics']['duration_seconds'],
+                'tokens_per_second': episode['metrics']['tokens_per_second'],
+                'is_regression_seed': episode['meta']['is_regression_seed'],
+                'was_mutated': episode['meta']['was_mutated'],
+                'batch_id': episode['meta']['batch_id'],
+                'timestamp': datetime.now().isoformat()
+            }
+
+            # Append to DataFrame
+            self.session_metrics['episode_df'] = pd.concat([
+                self.session_metrics['episode_df'],
+                pd.DataFrame([episode_metrics])
+            ], ignore_index=True)
+
+            # Track violations separately
+            if episode['metrics']['protocol_violations']:
+                for violation in episode['metrics']['protocol_violations']:
+                    violation_record = {
+                        'episode_id': episode['episode_id'],
+                        'violation_type': violation,
+                        'timestamp': datetime.now().isoformat()
+                    }
+                    self.violations_df = pd.concat([
+                        self.violations_df,
+                        pd.DataFrame([violation_record])
+                    ], ignore_index=True)
+
+            # Log episode
+            self.log_episode(episode)
+
+            # Save batch if full
+            if len(self.batch_episodes) >= self.batch_size:
+                self.save_batch()
+                self.batch_episodes = []
+                self.current_batch += 1
+
+            # Save metrics periodically
+            if self.episode_count % self.save_metrics_every == 0:
+                self.save_session_metrics()
+
+            self.episode_count += 1
+
+            # Log progress
+            if self.episode_count % 10 == 0:
+                logger.info(f"Completed {self.episode_count}/{self.target_episodes} episodes")
     
     def episode_done(self):
         """Check if we've generated enough episodes."""

@@ -63,7 +63,8 @@ EVAL_STEPS = 100
 
 # SFT-specific
 SFT_MAX_STEPS: int = 1000
-SFT_LR: float = 2e-4
+# SFT_LR: float = 2e-4              # use this on more comprehensive datasets
+SFT_LR: float = 5e-5                # smaller for style-based baseline SFT runs
 SFT_WARMUP_RATIO: float = 0.03
 SFT_LR_SCHEDULER: str = "cosine"
 
