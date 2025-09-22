@@ -8,6 +8,7 @@ import json
 import logging
 import sys
 import time
+import warnings
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 from datetime import datetime
@@ -16,7 +17,7 @@ from datasets import Dataset
 from transformers import (
     TrainingArguments,
     DataCollatorForLanguageModeling,
-    TrainerCallback,
+    TrainerCallback
 )
 from trl import SFTTrainer, SFTConfig, DataCollatorForCompletionOnlyLM
 
@@ -27,6 +28,7 @@ from training.checkpoint_manager import CheckpointManager
 from training.metrics_tracker import TrainingMetricsTracker
 from utils.dataset_loader import UnifiedDatasetLoader
 from utils.response_masking import ResponseMaskingHandler, ResponseMaskingConfig, MultiFormatResponseMasker
+from utils.json_data_collator import DataCollatorForJSON
 import training_parameters as params
 
 # Import error handling modules
@@ -146,8 +148,8 @@ class SFTTrainingPipeline:
         self.metrics_tracker = None
         self.tb_writer = None
 
-        # Initialize response masking handler (will be set up after tokenizer is loaded)
-        self.response_masker = None
+        # JSON data collator will be initialized after tokenizer is loaded
+        self.json_collator = None
 
     def load_ndjson_dataset(self, file_path: str) -> Dataset:
         """
@@ -163,66 +165,56 @@ class SFTTrainingPipeline:
         logger.info(f"Loading dataset from: {file_path}")
         return self.dataset_loader.load_dataset_auto(file_path)
 
-    def format_chat_template(self, example: Dict[str, Any]) -> str:
-        """
-        Format training example using chat template.
-        Now delegates to UnifiedDatasetLoader for consistency.
-
-        Args:
-            example: Single training example
-
-        Returns:
-            Formatted text for training
-        """
-        return self.dataset_loader.format_sft_dialogue(example)
-
     def preprocess_dataset(self, dataset: Dataset) -> Dataset:
         """
         Preprocess dataset for SFT training.
-        Now delegates to UnifiedDatasetLoader.
+        For JSON format, we keep the raw data without text formatting.
+        The DataCollatorForJSON will handle tokenization and masking.
 
         Args:
-            dataset: Raw dataset
+            dataset: Raw dataset with 'input' and 'output' fields
 
         Returns:
-            Preprocessed dataset with 'text' field
+            Dataset ready for training (no preprocessing needed)
         """
-        preprocessed = self.dataset_loader.preprocess_sft_dataset(
-            dataset,
-            format_func=self.format_chat_template
-        )
-        logger.info(f"Preprocessed {len(preprocessed)} examples")
+        logger.info(f"Loaded {len(dataset)} raw JSON examples")
 
-        # Verify the dataset has the required 'text' field
-        if 'text' not in preprocessed.column_names:
-            raise ValueError(f"Dataset missing 'text' field. Available columns: {preprocessed.column_names}")
+        # Verify the dataset has required fields
+        required_fields = {'input', 'output'}
+        if len(dataset) > 0:
+            sample = dataset[0]
+            if not all(field in sample for field in required_fields):
+                available = list(sample.keys()) if isinstance(sample, dict) else []
+                raise ValueError(f"Dataset missing required fields. Need: {required_fields}, Have: {available}")
 
-        # Log a sample to verify formatting
-        if len(preprocessed) > 0:
-            sample_text = preprocessed[0]['text']
-            logger.debug(f"Sample text (first 200 chars): {sample_text[:200]}...")
+        # Log sample to verify structure
+        if len(dataset) > 0:
+            sample = dataset[0]
+            logger.debug(f"Sample input: {str(sample.get('input', ''))[:200]}...")
+            logger.debug(f"Sample output: {sample.get('output', '')[:100]}...")
 
-        return preprocessed
+        # Return dataset as-is - no preprocessing needed
+        # The DataCollatorForJSON will handle everything during training
+        return dataset
 
     def _validate_masking_on_sample(self, dataset: Dataset, data_collator) -> None:
         """
-        Validate that response masking is working correctly on sample data.
+        Validate that JSON masking is working correctly on sample data.
 
         Args:
-            dataset: Training dataset to sample from
-            data_collator: Data collator with response masking
+            dataset: Training dataset with input/output JSON format
+            data_collator: JSON data collator
         """
         if len(dataset) == 0:
             logger.warning("Cannot validate masking on empty dataset")
             return
 
-        # Safety check for tokenizer and response_masker
-        if not self.tokenizer or not self.response_masker:
-            logger.warning("Cannot validate masking - tokenizer or response_masker not initialized")
+        if not self.tokenizer or not self.json_collator:
+            logger.warning("Cannot validate masking - tokenizer or collator not initialized")
             return
 
         logger.info("="*60)
-        logger.info("Validating Response Masking Configuration")
+        logger.info("Validating JSON Input/Output Masking")
         logger.info("="*60)
 
         # Take a few samples for validation
@@ -234,25 +226,20 @@ class SFTTrainingPipeline:
         total_tokens = 0
 
         for i in range(len(samples)):
-            # Get the text from dataset
             example = samples[i]
-            text = example.get('text', '') if isinstance(example, dict) else ''
-            if not text:
-                continue
 
-            # Tokenize
-            tokenized = self.tokenizer(
-                text,
-                truncation=True,
-                padding=False,
-                max_length=params.MAX_SEQ_LEN,
-                return_tensors="pt"
-            )
-            input_ids = tokenized["input_ids"][0]
+            # Log the raw JSON data
+            logger.info(f"\nSample {i+1}:")
+            if 'input' in example:
+                input_str = str(example['input'])[:200]
+                logger.info(f"  Input: {input_str}...")
+            if 'output' in example:
+                logger.info(f"  Output: {example['output'][:100]}...")
 
-            # Apply collator to get labels with masking
-            collated = data_collator([{"input_ids": input_ids}])
-            labels = collated["labels"][0]
+            # Apply collator to get tokenized and masked data
+            batch = data_collator([example])
+            input_ids = batch["input_ids"][0]
+            labels = batch["labels"][0]
 
             # Calculate masking statistics
             masked_count = (labels == params.MASKING_IGNORE_INDEX).sum().item()
@@ -265,11 +252,10 @@ class SFTTrainingPipeline:
 
             masking_ratio = masked_count / token_count if token_count > 0 else 0
 
-            # Log sample statistics
-            logger.info(f"\nSample {i+1}:")
+            # Log statistics
             logger.info(f"  Total tokens: {token_count}")
-            logger.info(f"  Masked tokens (context): {masked_count} ({masking_ratio:.1%})")
-            logger.info(f"  Supervised tokens (response): {supervised_count} ({(1-masking_ratio):.1%})")
+            logger.info(f"  Masked tokens (input): {masked_count} ({masking_ratio:.1%})")
+            logger.info(f"  Supervised tokens (output): {supervised_count} ({(1-masking_ratio):.1%})")
 
             # Show preview of what's being supervised
             if supervised_count > 0:
@@ -277,11 +263,7 @@ class SFTTrainingPipeline:
                 if len(supervised_ids) > 0:
                     supervised_text = self.tokenizer.decode(supervised_ids, skip_special_tokens=True)
                     preview_len = min(100, len(supervised_text))
-                    logger.info(f"  Supervised text preview: '{supervised_text[:preview_len]}...'")
-
-            # Detect format
-            format_name = self.response_masker.detect_format(text)
-            logger.info(f"  Detected format: {format_name}")
+                    logger.info(f"  Training on: '{supervised_text[:preview_len]}...'")
 
         # Calculate overall statistics
         if total_tokens > 0:
@@ -295,14 +277,12 @@ class SFTTrainingPipeline:
             logger.info(f"  Total supervised: {total_supervised} ({overall_supervision_ratio:.1%})")
 
             # Warnings for unusual masking ratios
-            if overall_supervision_ratio < 0.2:
-                logger.warning(f"⚠️  Low supervision ratio ({overall_supervision_ratio:.1%}) - may indicate incorrect response template detection")
-                logger.warning(f"   Check that response templates match your data format: {params.RESPONSE_TEMPLATES}")
-            elif overall_supervision_ratio > 0.8:
-                logger.warning(f"⚠️  High supervision ratio ({overall_supervision_ratio:.1%}) - may be training on context/prompts")
-                logger.warning(f"   Verify response templates are correctly configured")
+            if overall_supervision_ratio < 0.1:
+                logger.warning(f"⚠️  Low supervision ratio ({overall_supervision_ratio:.1%}) - check that outputs are being parsed correctly")
+            elif overall_supervision_ratio > 0.9:
+                logger.warning(f"⚠️  High supervision ratio ({overall_supervision_ratio:.1%}) - may be training on input context")
             else:
-                logger.info(f"✓ Masking ratio looks reasonable ({overall_masking_ratio:.1%} masked, {overall_supervision_ratio:.1%} supervised)")
+                logger.info(f"✓ Masking ratio looks reasonable ({overall_masking_ratio:.1%} input masked, {overall_supervision_ratio:.1%} output supervised)")
 
         logger.info("="*60 + "\n")
 
@@ -352,11 +332,15 @@ class SFTTrainingPipeline:
         if hasattr(self.model, 'config'):
             self.model.config.pad_token_id = self.tokenizer.pad_token_id
 
-        # Initialize response masking handler
-        logger.info("Initializing response masking handler...")
-        self.response_masker = MultiFormatResponseMasker(self.tokenizer)
-        logger.info("Response masking handler initialized for multi-format training")
-        logger.info(f"Response templates: {params.RESPONSE_TEMPLATES}")
+        # Initialize JSON data collator
+        logger.info("Initializing JSON data collator...")
+        self.json_collator = DataCollatorForJSON(
+            tokenizer=self.tokenizer,
+            max_length=params.MAX_SEQ_LEN,
+            pad_to_multiple_of=params.PAD_TO_MULTIPLE,
+            ignore_index=params.MASKING_IGNORE_INDEX
+        )
+        logger.info("JSON data collator initialized for input/output training")
         logger.info(f"Instruction templates: {params.INSTRUCTION_TEMPLATES}")
 
         # Log model info
@@ -434,29 +418,37 @@ class SFTTrainingPipeline:
             eval_steps=params.SAVE_STEPS if eval_dataset else None,
             seed=params.SEED,
             dataloader_num_workers=4,
-            remove_unused_columns=True,  # Let SFTTrainer manage columns
+            remove_unused_columns=False,  # Keep all columns for custom collator
             report_to=["tensorboard"],
             logging_dir=str(output_dir / "logs"),
             # SFT specific configs
             max_seq_length=params.MAX_SEQ_LEN,
-            packing=params.PACKING,
-            dataset_text_field="text",
+            packing=False,  # Disable packing when using custom collator
+            # Skip prepare dataset since our collator handles everything
+            dataset_kwargs={
+                "skip_prepare_dataset": True
+            }
         )
 
-        # Create data collator for response-only training
-        # This ensures loss is only computed on response portions
-        logger.info("Creating response-only data collator...")
-        data_collator = self.response_masker.create_adaptive_collator()
+        # Use JSON data collator for input/output masking
+        logger.info("Using JSON data collator for input/output masking...")
+        data_collator = self.json_collator
 
-        # Initialize SFTTrainer with response masking
+        # Initialize SFTTrainer with JSON data collator
+        # Keep dataset raw with {"input": ..., "output": ...} format
+        # The DataCollatorForJSON will handle all tokenization and masking
+
+        # IMPORTANT: We pass the raw dataset and let the collator handle everything
+        # No formatting_func, no dataset_text_field - just the collator
         trainer = SFTTrainer(
             model=self.model,
-            tokenizer=self.tokenizer,
+            tokenizer=self.tokenizer,  # Pass tokenizer for model saving
             train_dataset=train_dataset,
             eval_dataset=eval_dataset,
             args=training_args,
-            data_collator=data_collator,  # Use response-only collator
-            # SFTTrainer will handle tokenization with our custom collator
+            data_collator=data_collator,  # JSON collator handles everything
+            # No formatting_func or dataset_text_field
+            # The collator receives raw data and produces input_ids/labels/attention_mask
         )
 
         logger.info("Training Configuration:")
@@ -629,6 +621,11 @@ class SFTTrainingPipeline:
         # Wrap training with error handler if enabled
         if self.enable_error_handling and self.error_handler:
             logger.info("Starting training with error handling enabled...")
+
+            # Suppress TRL warnings during training
+            warnings.filterwarnings("ignore", message="Could not find response key")
+            warnings.filterwarnings("ignore", category=UserWarning, module="trl")
+
             start_time = time.time()
 
             # Create training context for error recovery
@@ -665,11 +662,12 @@ class SFTTrainingPipeline:
                     # Recreate trainer with new batch size
                     trainer = SFTTrainer(
                         model=self.model,
-                        tokenizer=self.tokenizer,
+                        tokenizer=self.tokenizer,  # Pass tokenizer for model saving
                         train_dataset=train_dataset,
                         eval_dataset=eval_dataset,
                         args=training_args,
-                        data_collator=data_collator,  # Use the response masking collator
+                        data_collator=data_collator,  # Use the JSON collator
+                        # No formatting_func or dataset_text_field
                     )
                     train_result = trainer.train()
                 else:

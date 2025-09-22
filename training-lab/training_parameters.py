@@ -8,7 +8,7 @@ PER_DEVICE_BATCH_SIZE: int = 1
 GRAD_ACCUM_STEPS: int = 8
 SEED: int = 42
 MODEL_TEMP: float = 0.5  # Temperature for model generation
-PACKING = True                                                  # ---- change this to False when using comprehensive datasets
+PACKING = False                                                 # ---- change this to False when using comprehensive datasets
 PAD_TO_MULTIPLE = 128
 
 # QLoRA quantization

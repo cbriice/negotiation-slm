@@ -349,8 +349,12 @@ class MultiFormatResponseMasker:
         # only one response template at a time. For multiple templates,
         # we'd need to extend it or use multiple collators
 
+        # Use instruction template for proper masking
+        instruction_template = "### Context:\n"
+
         return DataCollatorForCompletionOnlyLM(
             response_template=primary_template,
+            instruction_template=instruction_template,
             tokenizer=self.tokenizer,
             mlm=False,
             ignore_index=-100
