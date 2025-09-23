@@ -117,7 +117,15 @@ class SelfChatRunner(ParlaiScript):
         
         # Set up debug logging if requested
         if opt.get('debug'):
+            # Set root logger to DEBUG
             logging.getLogger().setLevel(logging.DEBUG)
+            # Also set specific module loggers to DEBUG
+            logging.getLogger('agents.ollama_wrapper').setLevel(logging.DEBUG)
+            logging.getLogger('worlds.selfchat_world').setLevel(logging.DEBUG)
+            logging.getLogger('tasks').setLevel(logging.DEBUG)
+            # Update the console handler format to show more detail
+            for handler in logging.getLogger().handlers:
+                handler.setLevel(logging.DEBUG)
         
         logger.info("="*60)
         logger.info("STARTING SELFCHAT NEGOTIATION SIMULATIONS")

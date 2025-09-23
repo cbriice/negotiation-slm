@@ -67,6 +67,7 @@ SFT_MAX_STEPS: int = 1000
 SFT_LR: float = 5e-5                # smaller for style-based baseline SFT runs
 SFT_WARMUP_RATIO: float = 0.03
 SFT_LR_SCHEDULER: str = "cosine"
+SFT_BASELINE_EPOCHS = 0.3                    # 0.3 epochs for baseline training
 
 # DPO-specific
 DPO_MAX_STEPS: int = 1000

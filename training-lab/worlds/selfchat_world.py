@@ -258,8 +258,10 @@ class SelfChatWorld(World):
         Execute a single negotiation episode.
         Returns complete episode data with metrics.
         """
+        logger.info(f"[run_episode] Starting episode {self.episode_count}")
         # Select seed
         seed, is_regression, was_mutated = self._select_seed()
+        logger.debug(f"[run_episode] Seed selected: regression={is_regression}, mutated={was_mutated}")
         
         # Initialize episode structure
         episode = {
@@ -327,9 +329,12 @@ class SelfChatWorld(World):
             current_agent = seller if turn % 2 == 1 else buyer
             other_agent = buyer if turn % 2 == 1 else seller
             speaker = current_agent.side
-            
+            logger.debug(f"[run_episode] Turn {turn}: {speaker}'s turn")
+
             # Generate response
+            logger.debug(f"[run_episode] Calling {speaker}.act()")
             response = current_agent.act()
+            logger.debug(f"[run_episode] {speaker} response received")
             
             # Extract text and check if episode is done
             text = response.get('text', '')

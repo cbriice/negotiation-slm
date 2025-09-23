@@ -335,24 +335,32 @@ class OllamaNegotiator(NegotiatorBase):
     def _generate_response(self, prompt: str, temperature: Optional[float] = None,
                           max_tokens: Optional[int] = None) -> Tuple[str, int, int]:
         """Generate response using HuggingFace model. Returns (response, prompt_tokens, output_tokens)."""
+        logger.debug(f"[_generate_response] Starting generation with temp={temperature}, max_tokens={max_tokens}")
         try:
             # Prepare full prompt with system prompt if provided
             full_prompt = prompt
             if self.system_prompt:
                 full_prompt = f"{self.system_prompt}\n\n{prompt}"
+            logger.debug(f"[_generate_response] Prompt length: {len(full_prompt)} chars")
 
             # Tokenize input
+            logger.debug("[_generate_response] Tokenizing input...")
             inputs = self.tokenizer(
                 full_prompt,
                 return_tensors="pt",
                 truncation=True,
                 max_length=2048,
             ).to(self.device)
+            logger.debug(f"[_generate_response] Tokenized. Input shape: {inputs['input_ids'].shape}")
 
             # Count prompt tokens
             prompt_tokens = inputs['input_ids'].shape[1]
+            logger.debug(f"[_generate_response] Prompt tokens: {prompt_tokens}")
 
             # Generate with mixed precision for better GPU utilization
+            logger.info(f"[_generate_response] Starting model.generate() with {prompt_tokens} prompt tokens, max_new={max_tokens if max_tokens else self.max_tokens}")
+            generation_start = time.time()
+
             with autocast(device_type='cuda', dtype=torch.bfloat16):
                 outputs = self.model.generate(
                     **inputs,
@@ -365,14 +373,20 @@ class OllamaNegotiator(NegotiatorBase):
                     use_cache=True,  # Enable KV cache for fast autoregressive decoding
                 )
 
+            generation_time = time.time() - generation_start
+            logger.info(f"[_generate_response] Generation completed in {generation_time:.2f}s. Output shape: {outputs.shape}")
+
             # Decode the response (only the new tokens)
+            logger.debug("[_generate_response] Decoding response...")
             response = self.tokenizer.decode(
                 outputs[0][inputs['input_ids'].shape[1]:],
                 skip_special_tokens=True
             )
+            logger.debug(f"[_generate_response] Decoded response length: {len(response)} chars")
 
             # Count output tokens
             output_tokens = outputs.shape[1] - prompt_tokens
+            logger.info(f"[_generate_response] Generated {output_tokens} tokens in {generation_time:.2f}s ({output_tokens/generation_time:.1f} tok/s)")
 
             return response.strip(), prompt_tokens, output_tokens
 
@@ -464,14 +478,17 @@ class OllamaNegotiator(NegotiatorBase):
     
     def generate_strategy(self) -> Dict[str, Any]:
         """Generate a negotiation strategy using internal prompt generation."""
+        logger.debug("[generate_strategy] Starting strategy generation")
         # Always use internal prompt generation
         prompt = self._build_strategy_prompt()
-            
+        logger.debug(f"[generate_strategy] Strategy prompt built, length: {len(prompt)} chars")
+
         start_time = time.time()
-        
+
         # Generate with lower temperature for more consistent strategies
+        logger.debug(f"[generate_strategy] Calling _generate_response with temp={self.strategy_temperature}, max_tokens={self.strategy_max_tokens}")
         response_text, prompt_tokens, output_tokens = self._generate_response(
-            prompt, 
+            prompt,
             temperature=self.strategy_temperature,
             max_tokens=self.strategy_max_tokens
         )
@@ -571,13 +588,18 @@ class OllamaNegotiator(NegotiatorBase):
     
     def act(self):
         """Generate a response using Ollama (with optional two-part strategy)."""
+        logger.info(f"[act] Starting act() for {self.id}, two_part={self.use_two_part_response}, turn={self.turn_count}")
         if self.use_two_part_response:
             # Phase 1: Generate strategy
+            logger.debug("[act] Generating strategy...")
             strategy = self.generate_strategy()
             self.current_strategy = strategy
+            logger.debug(f"[act] Strategy generated: {strategy.get('action', 'unknown')} action")
 
             # Phase 2: Generate response based on strategy
+            logger.debug("[act] Generating response based on strategy...")
             response = self.generate_response(strategy)
+            logger.debug(f"[act] Response generated, length: {len(response.get('text', ''))} chars")
 
             # Parse action from strategy (more reliable than parsing from text)
             action_str = strategy.get('action_indicator', 'PROPOSE')
@@ -602,15 +624,19 @@ class OllamaNegotiator(NegotiatorBase):
             }
 
             # Use dialogue flow manager with None strategy
+            logger.debug("[act] Building response prompt without strategy...")
             prompt = self.dialogue_flow.generate_response_prompt(None, 'PROPOSE', context)
+            logger.debug(f"[act] Prompt built, length: {len(prompt)} chars")
 
             start_time = time.time()
+            logger.debug("[act] Calling _generate_response...")
             response_text, prompt_tokens, output_tokens = self._generate_response(
                 prompt,
                 temperature=self.temperature,
                 max_tokens=self.response_max_tokens
             )
             duration_ms = (time.time() - start_time) * 1000
+            logger.debug(f"[act] Response generated in {duration_ms:.0f}ms")
 
             # Track metrics
             self.token_metrics.track_response_generation(

@@ -27,8 +27,8 @@ from training.lora_config import LoRAConfigurator
 from training.checkpoint_manager import CheckpointManager
 from training.metrics_tracker import TrainingMetricsTracker
 from utils.dataset_loader import UnifiedDatasetLoader
-from utils.response_masking import ResponseMaskingHandler, ResponseMaskingConfig, MultiFormatResponseMasker
 from utils.json_data_collator import DataCollatorForJSON
+from utils.weighted_loss_collator import WeightedLossCollator, WeightedLossTrainer
 import training_parameters as params
 
 # Import error handling modules
@@ -78,7 +78,7 @@ class SFTTrainingPipeline:
         # Initialize components
         self.model_loader = ModelLoader()
         self.lora_configurator = LoRAConfigurator()
-        self.checkpoint_manager = CheckpointManager(base_dir=self.checkpoint_dir)
+        self.checkpoint_manager = CheckpointManager(base_dir=str(self.checkpoint_dir))
         self.dataset_loader = UnifiedDatasetLoader()
 
         # Initialize error handling modules if enabled
@@ -148,8 +148,10 @@ class SFTTrainingPipeline:
         self.metrics_tracker = None
         self.tb_writer = None
 
-        # JSON data collator will be initialized after tokenizer is loaded
+        # Data collator will be initialized after tokenizer is loaded
         self.json_collator = None
+        self.weighted_collator = None
+        self.use_weighted_loss = False  # Will be set based on data format
 
     def load_ndjson_dataset(self, file_path: str) -> Dataset:
         """
@@ -168,33 +170,42 @@ class SFTTrainingPipeline:
     def preprocess_dataset(self, dataset: Dataset) -> Dataset:
         """
         Preprocess dataset for SFT training.
-        For JSON format, we keep the raw data without text formatting.
-        The DataCollatorForJSON will handle tokenization and masking.
+        Detects format and sets appropriate collator.
 
         Args:
-            dataset: Raw dataset with 'input' and 'output' fields
+            dataset: Raw dataset
 
         Returns:
-            Dataset ready for training (no preprocessing needed)
+            Dataset ready for training
         """
-        logger.info(f"Loaded {len(dataset)} raw JSON examples")
+        logger.info(f"Loaded {len(dataset)} raw examples")
 
-        # Verify the dataset has required fields
-        required_fields = {'input', 'output'}
         if len(dataset) > 0:
             sample = dataset[0]
-            if not all(field in sample for field in required_fields):
+
+            # Check for CraigslistBargain format (system, prompt, response)
+            if all(field in sample for field in ['system', 'prompt', 'response']):
+                logger.info("Detected CraigslistBargain format - using weighted loss")
+                self.use_weighted_loss = True
+
+                # Log sample
+                logger.debug(f"Sample system: {sample.get('system', '')[:100]}...")
+                logger.debug(f"Sample prompt: {sample.get('prompt', '')[:100]}...")
+                logger.debug(f"Sample response: {sample.get('response', '')[:100]}...")
+
+            # Check for standard format (input, output)
+            elif all(field in sample for field in ['input', 'output']):
+                logger.info("Detected standard JSON format - using standard masking")
+                self.use_weighted_loss = False
+
+                # Log sample
+                logger.debug(f"Sample input: {str(sample.get('input', ''))[:200]}...")
+                logger.debug(f"Sample output: {sample.get('output', '')[:100]}...")
+
+            else:
                 available = list(sample.keys()) if isinstance(sample, dict) else []
-                raise ValueError(f"Dataset missing required fields. Need: {required_fields}, Have: {available}")
+                raise ValueError(f"Unknown dataset format. Have fields: {available}")
 
-        # Log sample to verify structure
-        if len(dataset) > 0:
-            sample = dataset[0]
-            logger.debug(f"Sample input: {str(sample.get('input', ''))[:200]}...")
-            logger.debug(f"Sample output: {sample.get('output', '')[:100]}...")
-
-        # Return dataset as-is - no preprocessing needed
-        # The DataCollatorForJSON will handle everything during training
         return dataset
 
     def _validate_masking_on_sample(self, dataset: Dataset, data_collator) -> None:
@@ -332,16 +343,26 @@ class SFTTrainingPipeline:
         if hasattr(self.model, 'config'):
             self.model.config.pad_token_id = self.tokenizer.pad_token_id
 
-        # Initialize JSON data collator
-        logger.info("Initializing JSON data collator...")
-        self.json_collator = DataCollatorForJSON(
-            tokenizer=self.tokenizer,
-            max_length=params.MAX_SEQ_LEN,
-            pad_to_multiple_of=params.PAD_TO_MULTIPLE,
-            ignore_index=params.MASKING_IGNORE_INDEX
-        )
-        logger.info("JSON data collator initialized for input/output training")
-        logger.info(f"Instruction templates: {params.INSTRUCTION_TEMPLATES}")
+        # Initialize appropriate data collator
+        if hasattr(self, 'use_weighted_loss') and self.use_weighted_loss:
+            logger.info("Initializing weighted loss collator for CraigslistBargain...")
+            self.weighted_collator = WeightedLossCollator(
+                tokenizer=self.tokenizer,
+                max_length=params.MAX_SEQ_LEN,
+                pad_to_multiple_of=params.PAD_TO_MULTIPLE,
+                ignore_index=params.MASKING_IGNORE_INDEX,
+                prompt_weight=0.15  # 0.15x weight for prompts
+            )
+            logger.info("Weighted loss collator initialized (system: 0x, prompt: 0.15x, response: 1x)")
+        else:
+            logger.info("Initializing JSON data collator...")
+            self.json_collator = DataCollatorForJSON(
+                tokenizer=self.tokenizer,
+                max_length=params.MAX_SEQ_LEN,
+                pad_to_multiple_of=params.PAD_TO_MULTIPLE,
+                ignore_index=params.MASKING_IGNORE_INDEX
+            )
+            logger.info("JSON data collator initialized for input/output training")
 
         # Log model info
         trainable_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
@@ -430,9 +451,13 @@ class SFTTrainingPipeline:
             }
         )
 
-        # Use JSON data collator for input/output masking
-        logger.info("Using JSON data collator for input/output masking...")
-        data_collator = self.json_collator
+        # Select appropriate collator
+        if self.use_weighted_loss and self.weighted_collator:
+            logger.info("Using weighted loss collator for CraigslistBargain data...")
+            data_collator = self.weighted_collator
+        else:
+            logger.info("Using JSON data collator for input/output masking...")
+            data_collator = self.json_collator
 
         # Initialize SFTTrainer with JSON data collator
         # Keep dataset raw with {"input": ..., "output": ...} format
@@ -465,7 +490,10 @@ class SFTTrainingPipeline:
         logger.info(f"  - Packing: {params.PACKING}")
         logger.info(f"  - Mixed precision: bf16={params.BF16}, fp16={not params.BF16}")
         logger.info(f"  - Gradient checkpointing: {params.GRADIENT_CHECKPOINTING}")
-        logger.info(f"  - Response masking: ENABLED (loss computed on responses only)")
+        if self.use_weighted_loss:
+            logger.info(f"  - Loss weighting: ENABLED (system: 0x, prompt: 0.15x, response: 1x)")
+        else:
+            logger.info(f"  - Response masking: ENABLED (loss computed on responses only)")
 
         # Validate masking on sample batch
         self._validate_masking_on_sample(train_dataset, data_collator)

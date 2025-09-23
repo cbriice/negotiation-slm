@@ -14,8 +14,7 @@ from typing import Dict, Optional
 # Add parent directory to path for imports
 sys.path.append(str(Path(__file__).parent.parent))
 
-from training.converters.builtin_export import BuiltinTaskExporter
-from training.data_converter import DataConverter
+from training.craigslist_loader import CraigslistBargainLoader
 from training.sft_trainer import main as sft_main
 import training_parameters as params
 
@@ -41,126 +40,126 @@ for handler in root_logger.handlers[:]:
 logger = logging.getLogger(__name__)
 
 
-def export_builtin_tasks(output_dir: str = "data/training/builtin_tasks",
-                         episodes_per_task: int = 1000) -> Dict[str, str]:
+def load_craigslist_dataset(output_dir: str = "data/training/craigslist",
+                            use_all_splits: bool = True) -> str:
     """
-    Export Deal-or-No-Deal and Casino tasks to JSONL format.
+    Load and process CraigslistBargain dataset to SFT format.
 
     Args:
-        output_dir: Directory to save exported tasks
-        episodes_per_task: Number of episodes to extract per task
+        output_dir: Directory to save processed data
+        use_all_splits: Whether to use all splits for maximum diversity
 
     Returns:
-        Dict mapping task names to output file paths
+        Path to SFT formatted file
     """
     logger.info("=" * 80)
-    logger.info("STEP 1: Exporting ParlAI built-in negotiation tasks")
+    logger.info("STEP 1: Loading CraigslistBargain dataset from HuggingFace")
     logger.info("=" * 80)
 
-    exporter = BuiltinTaskExporter(output_dir=output_dir)
+    loader = CraigslistBargainLoader(cache_dir=output_dir)
 
-    # Export dealnodeal task (casino doesn't exist in ParlAI)
-    task_files = exporter.export_all_tasks(
-        task_names=['dealnodeal'],
-        max_episodes_per_task=episodes_per_task
-    )
-
-    logger.info(f"Exported tasks to: {task_files}")
-    return task_files
-
-
-def convert_to_sft_format(task_files: Dict[str, str],
-                         output_dir: str = "data/training/sft") -> str:
-    """
-    Convert exported episodes to SFT training format.
-
-    Args:
-        task_files: Dict mapping task names to episode file paths
-        output_dir: Directory to save SFT formatted data
-
-    Returns:
-        Path to combined SFT training file
-    """
-    logger.info("=" * 80)
-    logger.info("STEP 2: Converting episodes to SFT format")
-    logger.info("=" * 80)
-
-    converter = DataConverter(output_dir=output_dir)
-    all_sft_files = []
-
-    for task_name, episode_file in task_files.items():
-        logger.info(f"Converting {task_name} episodes...")
-
-        # Convert episodes to SFT format
-        sft_file = converter.convert_episodes_to_sft(
-            episodes_file=episode_file,
-            output_file=f"{output_dir}/{task_name}_sft.jsonl"
+    if use_all_splits:
+        # Use train + validation for maximum diversity
+        output_file = f"{output_dir}/craigslist_full_sft.jsonl"
+        sft_file = loader.create_full_training_set(output_file)
+    else:
+        # Use train split only
+        dataset = loader.load_dataset('train')
+        output_file = f"{output_dir}/craigslist_train_sft.jsonl"
+        sft_file = loader.process_dataset_to_sft(
+            dataset=dataset,
+            output_file=output_file
         )
 
-        all_sft_files.append(sft_file)
+    logger.info(f"Processed dataset saved to: {sft_file}")
+    return sft_file
 
-        # Count converted packets
-        packet_count = 0
-        with open(sft_file, 'r') as f:
-            for line in f:
-                if line.strip():
+
+def validate_sft_format(sft_file: str) -> int:
+    """
+    Validate and count SFT packets in the file.
+
+    Args:
+        sft_file: Path to SFT file
+
+    Returns:
+        Number of valid packets
+    """
+    logger.info("=" * 80)
+    logger.info("STEP 2: Validating SFT format")
+    logger.info("=" * 80)
+
+    packet_count = 0
+    invalid_count = 0
+
+    with open(sft_file, 'r') as f:
+        for i, line in enumerate(f):
+            if not line.strip():
+                continue
+
+            try:
+                packet = json.loads(line)
+
+                # Validate required fields
+                required = ['id', 'system', 'prompt', 'response']
+                if all(field in packet for field in required):
                     packet_count += 1
-        logger.info(f"  Generated {packet_count} SFT packets from {task_name}")
 
-    # Combine all SFT files into one
-    output_path = Path(output_dir) / "baseline_negotiation_sft.jsonl"
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+                    # Log sample packets
+                    if packet_count <= 3:
+                        logger.info(f"Sample packet {packet_count}:")
+                        logger.info(f"  ID: {packet['id']}")
+                        logger.info(f"  System: {packet['system'][:100]}...")
+                        logger.info(f"  Prompt: {packet['prompt'][:100]}...")
+                        logger.info(f"  Response: {packet['response'][:100]}...")
+                else:
+                    invalid_count += 1
+                    logger.warning(f"Line {i+1}: Missing fields - has {list(packet.keys())}")
 
-    total_packets = 0
-    with open(output_path, 'w') as out_f:
-        for sft_file in all_sft_files:
-            with open(sft_file, 'r') as in_f:
-                for line in in_f:
-                    if line.strip():
-                        out_f.write(line)
-                        total_packets += 1
+            except json.JSONDecodeError as e:
+                invalid_count += 1
+                logger.warning(f"Line {i+1}: Invalid JSON - {e}")
 
-    logger.info(f"Saved {total_packets} total SFT packets to {output_path}")
-    return str(output_path)
+    logger.info(f"Validation complete: {packet_count} valid packets, {invalid_count} invalid")
+    return packet_count
 
 
 def calculate_epoch_fraction(sft_file: str,
-                           target_epochs_per_task: float = 0.5) -> Dict:
+                           target_epochs_per_task: float = params.SFT_BASELINE_EPOCHS) -> Dict:
     """
-    Calculate training parameters for 0.5 epochs per task.
+    Calculate training parameters for params.SFT_BASELINE_EPOCHS (0.3 as of rn) epochs per task.
 
     Args:
         sft_file: Path to SFT training file
-        target_epochs_per_task: Target epochs per task (default 0.5)
+        target_epochs_per_task: Target epochs per task (default in training_parameters.py)
 
     Returns:
         Dict with calculated training parameters
     """
     # Count total examples
     total_examples = 0
-    task_counts = {}
+    role_counts = {'buyer': 0, 'seller': 0}
 
     with open(sft_file, 'r') as f:
         for line in f:
             if line.strip():
                 total_examples += 1
                 data = json.loads(line)
-                task = data.get('metadata', {}).get('source_task', 'unknown')
-                task_counts[task] = task_counts.get(task, 0) + 1
+                # Extract role from ID (format: convid_role_turn)
+                id_parts = data.get('id', '').split('_')
+                if len(id_parts) >= 2:
+                    role = id_parts[1]
+                    if role in role_counts:
+                        role_counts[role] += 1
 
     logger.info(f"Training data statistics:")
     logger.info(f"  Total examples: {total_examples}")
-    for task, count in task_counts.items():
-        logger.info(f"  {task}: {count} examples")
+    for role, count in role_counts.items():
+        logger.info(f"  {role}: {count} examples")
 
-    # Calculate epochs - adjust if only one task
-    # If we only have dealnodeal, we'll do more epochs on it
-    num_tasks = len(task_counts)
-    if num_tasks == 1:
-        # ----------------------------------------------------------------- num epochs default config ----------------------------------------------------------------------
-        total_epochs = 0.3
-    else:
-        total_epochs = num_tasks * target_epochs_per_task
+    # For CraigslistBargain, use smaller epochs since dataset is larger
+    # and more diverse than DealNoDeal
+    total_epochs = target_epochs_per_task
 
     # Calculate steps based on batch size
     effective_batch_size = params.PER_DEVICE_BATCH_SIZE * params.GRAD_ACCUM_STEPS
@@ -178,7 +177,7 @@ def calculate_epoch_fraction(sft_file: str,
 def run_baseline_sft(sft_file: str,
                     output_dir: str = "models/negotiation_baseline",
                     checkpoint_dir: str = "checkpoints/baseline",
-                    num_epochs: float = 1.0,
+                    num_epochs: float = params.SFT_BASELINE_EPOCHS,
                     max_steps: Optional[int] = None) -> None:
     """
     Run baseline SFT training on negotiation tasks.
@@ -229,7 +228,7 @@ def run_baseline_sft(sft_file: str,
             'training_data': sft_file,
             'num_epochs': num_epochs,
             'max_steps': max_steps,
-            'description': 'Baseline negotiation model trained on Deal-or-No-Deal and Casino tasks'
+            'description': 'Baseline negotiation model trained on CraigslistBargain dataset'
         }
 
         info_path = Path(output_dir) / 'model_info.json'
@@ -248,34 +247,35 @@ def run_baseline_sft(sft_file: str,
 def main():
     """Main entry point for baseline training."""
     parser = argparse.ArgumentParser(
-        description="Run baseline training using ParlAI built-in negotiation tasks",
+        description="Run baseline training using CraigslistBargain dataset",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 This script implements step 2 of the negotiation training plan:
-- Exports Deal-or-No-Deal task from ParlAI (Note: Casino task not available in ParlAI)
-- Converts it to SFT format
-- Runs training epochs as specified
+- Loads CraigslistBargain dataset from HuggingFace
+- Processes multi-turn dialogues into SFT format
+- Filters empty utterances and formats system prompts
+- Runs training with weighted loss (prompt: 0.1-0.2x, response: 1x)
 - Saves the baseline model for future DPO reference
 
 Example usage:
-  # Run with default settings (recommended)
+  # Run with default settings (uses all splits for diversity)
   python scripts/run_baseline_training.py
 
-  # Custom episode count per task
-  python scripts/run_baseline_training.py --episodes-per-task 2000
+  # Use only training split
+  python scripts/run_baseline_training.py --train-only
 
   # Custom output directories
   python scripts/run_baseline_training.py --output-dir models/my_baseline --checkpoint-dir checkpoints/my_baseline
 
-  # Skip export if already done
-  python scripts/run_baseline_training.py --skip-export --sft-file data/training/sft/baseline_negotiation_sft.jsonl
+  # Skip data loading if already processed
+  python scripts/run_baseline_training.py --skip-export --sft-file data/training/craigslist/craigslist_full_sft.jsonl
         """
     )
 
-    parser.add_argument('--episodes-per-task', type=int, default=1000,
-                       help='Number of episodes to extract per task (default: 1000)')
-    parser.add_argument('--epochs-per-task', type=float, default=0.5,
-                       help='Training epochs per task (default: 0.5)')
+    parser.add_argument('--train-only', action='store_true',
+                       help='Use only training split (default: use train+validation)')
+    parser.add_argument('--epochs', type=float, default=params.SFT_BASELINE_EPOCHS,
+                       help='Number of training epochs (default: in training_parameters.SFT_BASELINE_EPOCHS)')
     parser.add_argument('--output-dir', default='data/models/negotiation_baseline',
                        help='Output directory for trained model')
     parser.add_argument('--checkpoint-dir', default='data/checkpoints/baseline',
@@ -292,18 +292,15 @@ Example usage:
     args = parser.parse_args()
 
     try:
-        # Step 1: Export built-in tasks
+        # Step 1: Load and process CraigslistBargain dataset
         if not args.skip_export:
-            task_files = export_builtin_tasks(
-                output_dir=f"{args.data_dir}/builtin_tasks",
-                episodes_per_task=args.episodes_per_task
+            sft_file = load_craigslist_dataset(
+                output_dir=f"{args.data_dir}/craigslist",
+                use_all_splits=not args.train_only
             )
 
-            # Step 2: Convert to SFT format
-            sft_file = convert_to_sft_format(
-                task_files=task_files,
-                output_dir=f"{args.data_dir}/sft"
-            )
+            # Step 2: Validate SFT format
+            packet_count = validate_sft_format(sft_file)
         else:
             if not args.sft_file:
                 logger.error("--sft-file required when using --skip-export")
@@ -314,7 +311,7 @@ Example usage:
         # Calculate training parameters
         training_params = calculate_epoch_fraction(
             sft_file=sft_file,
-            target_epochs_per_task=args.epochs_per_task
+            target_epochs_per_task=args.epochs
         )
 
         logger.info("Calculated training parameters:")
