@@ -26,8 +26,11 @@ class WeightedLossCollator:
 
     Loss weights:
     - System: 0.0 (masked completely)
-    - Prompt: 0.1-0.2x weight
+    - Prompt: 0.15x weight (configurable via prompt_weight)
     - Response: 1.0x weight
+
+    The collator returns loss_weights tensor that the custom trainer
+    uses to apply different weights to different parts of the sequence.
     """
 
     tokenizer: PreTrainedTokenizerBase
@@ -48,11 +51,12 @@ class WeightedLossCollator:
             features: List of examples with system/prompt/response fields
 
         Returns:
-            Dict with input_ids, attention_mask, and labels tensors
+            Dict with input_ids, attention_mask, labels, and loss_weights tensors
         """
         batch_input_ids = []
         batch_labels = []
         batch_attention_mask = []
+        batch_loss_weights = []
 
         for feature in features:
             # Parse if JSON string
@@ -121,22 +125,22 @@ class WeightedLossCollator:
                 response_content_start = response_text_start + len(response_marker)
                 response_start = self._find_token_position(offsets, response_content_start)
 
-            # Create labels with weighted masking
+            # Create labels and loss weights
             labels = []
+            loss_weights = []
             for i, token_id in enumerate(input_ids):
                 if i < system_end:
                     # System prompt - completely masked
                     labels.append(self.ignore_index)
+                    loss_weights.append(0.0)
                 elif i < response_start:
-                    # Prompt/context - apply weighted loss
-                    # We'll handle the weighting in the trainer by modifying loss computation
-                    # For now, mark with a special value that we'll recognize
-                    # Use negative values to indicate weighted tokens
-                    weighted_token = -token_id - 10000  # Offset to distinguish from ignore_index
-                    labels.append(weighted_token)
+                    # Prompt/context - apply reduced weight
+                    labels.append(token_id)
+                    loss_weights.append(self.prompt_weight)
                 else:
                     # Response - full weight
                     labels.append(token_id)
+                    loss_weights.append(1.0)
 
             # Create attention mask
             attention_mask = [1] * len(input_ids)
@@ -144,13 +148,15 @@ class WeightedLossCollator:
             batch_input_ids.append(input_ids)
             batch_labels.append(labels)
             batch_attention_mask.append(attention_mask)
+            batch_loss_weights.append(loss_weights)
 
         # Handle empty batch
         if not batch_input_ids:
             return {
                 'input_ids': torch.tensor([[]], dtype=torch.long),
                 'labels': torch.tensor([[]], dtype=torch.long),
-                'attention_mask': torch.tensor([[]], dtype=torch.long)
+                'attention_mask': torch.tensor([[]], dtype=torch.long),
+                'loss_weights': torch.tensor([[]], dtype=torch.float)
             }
 
         # Find max length in batch
@@ -171,11 +177,13 @@ class WeightedLossCollator:
                 batch_input_ids[i] += [self.tokenizer.pad_token_id] * padding_length
                 batch_labels[i] += [self.ignore_index] * padding_length
                 batch_attention_mask[i] += [0] * padding_length
+                batch_loss_weights[i] += [0.0] * padding_length
 
         return {
             'input_ids': torch.tensor(batch_input_ids, dtype=torch.long),
             'labels': torch.tensor(batch_labels, dtype=torch.long),
-            'attention_mask': torch.tensor(batch_attention_mask, dtype=torch.long)
+            'attention_mask': torch.tensor(batch_attention_mask, dtype=torch.long),
+            'loss_weights': torch.tensor(batch_loss_weights, dtype=torch.float)
         }
 
     def _find_token_position(self, offsets: List[tuple], char_position: int) -> int:

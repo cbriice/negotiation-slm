@@ -25,13 +25,15 @@ Path('logs').mkdir(exist_ok=True)
 
 # Configure logging with 'w' mode to clear log on each run
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.DEBUG,  # Changed to DEBUG for comprehensive logging
+    format='%(asctime)s - %(name)s - [%(levelname)s] - %(funcName)s:%(lineno)d - %(message)s',
     handlers=[
-        logging.FileHandler('logs/agent_logs.log', mode='w')
+        logging.FileHandler('logs/agent_logs.log', mode='w'),
+        logging.StreamHandler()  # Also log to console
     ]
 )
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
 
 # Suppress urllib3 debug logs
 logging.getLogger('urllib3').setLevel(logging.WARNING)
@@ -97,7 +99,9 @@ class OllamaNegotiator(NegotiatorBase):
         return argparser
     
     def __init__(self, opt, shared=None):
+        logger.debug("[OllamaNegotiator.__init__] Initializing OllamaNegotiator")
         super().__init__(opt, shared)
+        logger.debug("[OllamaNegotiator.__init__] Parent class initialized")
 
         # Model configuration
         self.model_name = opt.get('model_name', 'mistralai/Mistral-7B-v0.1')
@@ -110,10 +114,12 @@ class OllamaNegotiator(NegotiatorBase):
 
         # Load HF model and tokenizer
         if shared and 'model' in shared:
+            logger.debug("[__init__] Using shared model from previous agent")
             self.model = shared['model']
             self.tokenizer = shared['tokenizer']
             logger.info("Using shared model instance")
         else:
+            logger.debug("[__init__] Loading new model instance")
             self._load_hf_model()
         
         # Two-part response configuration
@@ -141,6 +147,7 @@ class OllamaNegotiator(NegotiatorBase):
     
     def _load_hf_model(self):
         """Load HuggingFace model with optional LoRA adapters."""
+        logger.debug("[_load_hf_model] Starting model loading process")
         logger.info(f"Loading HF model: {self.model_name}")
 
         # Auto-load latest checkpoint if requested
@@ -184,6 +191,8 @@ class OllamaNegotiator(NegotiatorBase):
 
             # Load base model with quantization and Flash Attention 2
             logger.info("Loading base model with Flash Attention 2...")
+            logger.debug(f"[_load_hf_model] Loading from: {self.model_name}")
+            logger.debug(f"[_load_hf_model] Device map: auto, Max memory: {max_memory}")
             self.model = AutoModelForCausalLM.from_pretrained(
                 self.model_name,
                 quantization_config=bnb_config,

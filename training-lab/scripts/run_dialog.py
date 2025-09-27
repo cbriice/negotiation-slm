@@ -56,8 +56,8 @@ class DialogRunner(ParlaiScript):
         parser.add_argument(
             '--model-name',
             type=str,
-            default='mistral:7b',
-            help='Ollama model name'
+            default='mistralai/Mistral-7B-v0.1',
+            help='HuggingFace model name'
         )
 
         parser.add_argument(
@@ -101,7 +101,7 @@ class DialogRunner(ParlaiScript):
         logger.info(f"Target episodes: {opt.get('num_episodes', 2000)}")
         logger.info(f"Max turns per episode: {opt.get('max_turns', 20)}")
         logger.info(f"Output directory: {opt.get('output_dir', 'data/negotiations/dialog_partner/')}")
-        logger.info(f"Model: {opt.get('model_name', 'mistral:7b')}")
+        logger.info(f"Model: {opt.get('model_name', 'mistralai/Mistral-7B-v0.1')}")
         if opt.get('model_checkpoint'):
             logger.info(f"LoRA checkpoint: {opt.get('model_checkpoint')}")
         logger.info(f"Two-part response: {opt.get('use_two_part_response', True)}")

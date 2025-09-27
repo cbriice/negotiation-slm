@@ -134,37 +134,46 @@ class ActionPromptGenerator:
         state = context.get('state', {})
         history = context.get('history', [])
 
-        # Get target price based on role
-        if side == 'buyer':
-            target_price = role_state.get('target_price', 850)
-        else:  # seller
-            target_price = role_state.get('min_price', 900)
+        # Format prompt to match training data structure
+        # The model was trained on prompts that look like:
+        # "State: {...}\nbuyer: msg1\nseller: msg2\nAgent: "
 
-        # Get item info
-        item_name = 'the item'
-        if state and 'item' in state:
-            item_name = state['item'].get('name', 'the item')
+        prompt_parts = []
 
-        # Get partner's last message if available
-        partner_msg = ""
+        # Add state information (matching training format)
+        if state:
+            # Format state similar to training data
+            state_info = {}
+            if 'item' in state:
+                state_info['item'] = state['item'].get('name', 'unknown')
+                state_info['list_price'] = state['item'].get('list_price', 0)
+
+            # Add role-specific price constraints
+            if side == 'buyer':
+                state_info['max_price'] = role_state.get('max_price', 1000)
+                state_info['target_price'] = role_state.get('target_price', 850)
+            else:  # seller
+                state_info['min_price'] = role_state.get('min_price', 900)
+                state_info['target_price'] = role_state.get('target_price', 1000)
+
+            prompt_parts.append(f"State: {json.dumps(state_info)}")
+
+        # Add conversation history (matching training format)
         if history:
-            for entry in reversed(history):
+            for entry in history[-5:]:  # Last 5 turns for context
+                turn_side = 'buyer' if entry.get('is_self', False) and side == 'buyer' else 'seller'
                 if not entry.get('is_self', False):
-                    partner_msg = entry.get('text', '')
-                    break
+                    turn_side = 'seller' if side == 'buyer' else 'buyer'
+                text = entry.get('text', '')
+                if text:
+                    prompt_parts.append(f"{turn_side}: {text}")
 
-        # Build simple, concise prompt
-        prompt_parts = [
-            f"You are a {side} negotiating for {item_name}.",
-            f"Your target price is ${target_price}."
-        ]
+        # Join parts and add the "Agent: " suffix that the model expects
+        prompt = '\n'.join(prompt_parts)
+        if prompt:
+            prompt += '\nAgent: '  # Critical: This matches the training format
 
-        if partner_msg:
-            prompt_parts.append(f"\nPartner's last message: \"{partner_msg}\"")
-
-        prompt_parts.append(f"\nMake a negotiation offer or response.")
-
-        return "\n".join(prompt_parts)
+        return prompt
 
     def _propose_prompt(self, strategy: Dict[str, Any], context: Dict[str, Any]) -> str:
         """Generate PROPOSE action prompt."""

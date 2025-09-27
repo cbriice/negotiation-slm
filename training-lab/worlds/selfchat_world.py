@@ -24,12 +24,13 @@ from agents.ollama_wrapper import OllamaNegotiator
 from agents.negotiator_base import NegotiationState, NegotiationAction
 from tasks.selfplay_teacher import SelfPlayTeacher
 
-# Set up logging
+# Set up logging with comprehensive DEBUG level
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - [%(levelname)s] - %(funcName)s:%(lineno)d - %(message)s'
 )
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
 
 
 class SelfChatWorld(World):
@@ -115,9 +116,12 @@ class SelfChatWorld(World):
     
     def __init__(self, opt: Opt, agents=None, shared=None):
         """Initialize the SelfChatWorld."""
+        logger.debug("[SelfChatWorld.__init__] Starting initialization")
         super().__init__(opt)
+        logger.debug("[SelfChatWorld.__init__] Parent class initialized")
 
         # Configuration
+        logger.debug("[SelfChatWorld.__init__] Loading configuration...")
         self.target_episodes = opt.get('num_episodes', 1500)
         self.batch_size = opt.get('batch_size', 100)
         self.seed_mutation_rate = opt.get('seed_mutation_rate', 0.1)
@@ -125,6 +129,7 @@ class SelfChatWorld(World):
         self.max_turns = opt.get('max_turns', 20)
         self.output_dir = Path(opt.get('output_dir', 'data/negotiations/selfchat/'))
         self.save_metrics_every = opt.get('save_metrics_every', 50)
+        logger.debug(f"[SelfChatWorld.__init__] Config: episodes={self.target_episodes}, batch={self.batch_size}, max_turns={self.max_turns}")
 
         # Parallel processing configuration
         self.parallel_episodes = opt.get('parallel_episodes', 4)  # Process 4 episodes in parallel
@@ -145,21 +150,30 @@ class SelfChatWorld(World):
             dir_path.mkdir(parents=True, exist_ok=True)
         
         # Initialize teacher for state seeds
+        logger.debug("[SelfChatWorld.__init__] Initializing SelfPlayTeacher...")
         teacher_opt = deepcopy(opt)
         teacher_opt['negotiation_data_dir'] = str(self.output_dir)
         teacher_opt['selfplay_seed_file'] = 'state_seeds.jsonl'
+        logger.debug(f"[SelfChatWorld.__init__] Teacher opt: negotiation_data_dir={teacher_opt['negotiation_data_dir']}")
         self.teacher = SelfPlayTeacher(teacher_opt, shared)
+        logger.debug("[SelfChatWorld.__init__] SelfPlayTeacher initialized")
         
         # Load state seeds
+        logger.debug("[SelfChatWorld.__init__] Loading state seeds from teacher...")
         self.state_seeds = self.teacher.state_seeds
         self.regression_seeds = self.teacher.regression_seeds
         self.active_seed_idx = 0
+        logger.debug(f"[SelfChatWorld.__init__] Loaded {len(self.state_seeds)} state seeds, {len(self.regression_seeds)} regression seeds")
         
         # Initialize agents if not provided
+        logger.debug("[SelfChatWorld.__init__] Initializing agents...")
         if agents:
+            logger.debug("[SelfChatWorld.__init__] Using provided agents")
             self.agents = agents
         else:
+            logger.debug("[SelfChatWorld.__init__] Creating new agents")
             self.agents = self._create_agents(opt)
+            logger.debug(f"[SelfChatWorld.__init__] Created {len(self.agents)} agents")
         
         # Episode tracking
         self.current_episode = None
@@ -183,6 +197,7 @@ class SelfChatWorld(World):
     
     def _create_agents(self, opt: Opt) -> List[OllamaNegotiator]:
         """Create buyer and seller agents."""
+        logger.debug("[_create_agents] Starting agent creation")
         agents = []
         shared = {}
 
@@ -190,21 +205,27 @@ class SelfChatWorld(World):
         # HF models can't truly parallelize on single GPU anyway
 
         for i, side in enumerate(['buyer', 'seller']):
+            logger.debug(f"[_create_agents] Creating {side} agent")
             agent_opt = deepcopy(opt)
             agent_opt['id'] = f"negotiator_{side}"
 
             if opt.get('model_checkpoint'):
                 agent_opt['lora_checkpoint'] = opt['model_checkpoint']
+                logger.debug(f"[_create_agents] Using LoRA checkpoint: {opt['model_checkpoint']}")
 
             # Share model between agents
+            logger.debug(f"[_create_agents] Initializing OllamaNegotiator for {side}")
             agent = OllamaNegotiator(agent_opt, shared)
             agent.side = side
             agents.append(agent)
+            logger.debug(f"[_create_agents] {side} agent created")
 
             # After first agent, share its model
             if i == 0:
+                logger.debug("[_create_agents] Sharing model from first agent")
                 shared = agent.share()
 
+        logger.debug(f"[_create_agents] Completed creating {len(agents)} agents")
         return agents
     
     def load_state_seeds(self) -> Tuple[List[Dict], List[Dict]]:
@@ -259,9 +280,13 @@ class SelfChatWorld(World):
         Returns complete episode data with metrics.
         """
         logger.info(f"[run_episode] Starting episode {self.episode_count}")
+        logger.debug(f"[run_episode] Entering run_episode method")
+
         # Select seed
+        logger.debug(f"[run_episode] Selecting seed...")
         seed, is_regression, was_mutated = self._select_seed()
         logger.debug(f"[run_episode] Seed selected: regression={is_regression}, mutated={was_mutated}")
+        logger.debug(f"[run_episode] Seed details: {seed.get('item', {}).get('name', 'Unknown')}")
         
         # Initialize episode structure
         episode = {
@@ -283,9 +308,14 @@ class SelfChatWorld(World):
         }
         
         # Initialize agents with seed state
+        logger.debug(f"[run_episode] Initializing agents with seed state")
         buyer, seller = self.agents
+        logger.debug(f"[run_episode] Initializing buyer agent")
         buyer.initialize_from_state(seed, 'buyer')
+        logger.debug(f"[run_episode] Buyer initialized")
+        logger.debug(f"[run_episode] Initializing seller agent")
         seller.initialize_from_state(seed, 'seller')
+        logger.debug(f"[run_episode] Seller initialized")
         
         # Reset agent states
         for agent in self.agents:
@@ -305,7 +335,10 @@ class SelfChatWorld(World):
         episode_start = time.time()
         
         # Generate opening from buyer
+        logger.debug(f"[run_episode] Generating opening from buyer")
         opening = self.teacher._generate_opening_prompt(seed, 'buyer')
+        logger.debug(f"[run_episode] Opening generated: {opening[:100] if opening else 'None'}...")
+
         if opening:
             episode['dialogue'].append({
                 'turn': 0,
@@ -315,9 +348,11 @@ class SelfChatWorld(World):
                 'tokens': len(opening.split()),
                 'timestamp': datetime.now().isoformat()
             })
-            
+
             # Seller observes buyer's opening
+            logger.debug(f"[run_episode] Seller observing buyer's opening")
             seller.observe({'text': opening, 'episode_done': False})
+            logger.debug(f"[run_episode] Seller observed opening")
         
         # Run negotiation turns
         turn = 1
@@ -325,16 +360,24 @@ class SelfChatWorld(World):
         episode_done = False
         
         while turn < max_turns and not episode_done:
+            logger.debug(f"[run_episode] ========== Turn {turn}/{max_turns} ==========")
+
             # Determine current speaker (alternate turns)
             current_agent = seller if turn % 2 == 1 else buyer
             other_agent = buyer if turn % 2 == 1 else seller
             speaker = current_agent.side
             logger.debug(f"[run_episode] Turn {turn}: {speaker}'s turn")
+            logger.debug(f"[run_episode] Current agent type: {type(current_agent).__name__}")
 
             # Generate response
-            logger.debug(f"[run_episode] Calling {speaker}.act()")
-            response = current_agent.act()
-            logger.debug(f"[run_episode] {speaker} response received")
+            logger.debug(f"[run_episode] About to call {speaker}.act()")
+            try:
+                response = current_agent.act()
+                logger.debug(f"[run_episode] {speaker} response received successfully")
+                logger.debug(f"[run_episode] Response keys: {response.keys() if response else 'None'}")
+            except Exception as e:
+                logger.error(f"[run_episode] Error in {speaker}.act(): {e}", exc_info=True)
+                raise
             
             # Extract text and check if episode is done
             text = response.get('text', '')
@@ -385,7 +428,9 @@ class SelfChatWorld(World):
             
             # Other agent observes
             if not episode_done:
+                logger.debug(f"[run_episode] {other_agent.side} observing {speaker}'s response")
                 other_agent.observe({'text': text, 'episode_done': episode_done})
+                logger.debug(f"[run_episode] {other_agent.side} observed response")
             
             # Check for conclusion
             if episode_done or current_agent.negotiation_state in [
@@ -395,6 +440,7 @@ class SelfChatWorld(World):
                 break
             
             turn += 1
+            logger.debug(f"[run_episode] Turn {turn-1} completed, episode_done={episode_done}")
         
         # Calculate episode metrics
         episode_duration = time.time() - episode_start
@@ -666,13 +712,19 @@ class SelfChatWorld(World):
         Execute episodes of self-chat negotiation.
         Override of ParlAI World method to support parallel processing.
         """
+        logger.debug(f"[parley] Starting parley, episode_count={self.episode_count}, target={self.target_episodes}")
+
         if self.episode_count >= self.target_episodes:
+            logger.debug(f"[parley] Target episodes reached, returning")
             return
 
         if self.use_batch_inference and self.parallel_episodes > 1:
             # Run multiple episodes in parallel
+            logger.debug(f"[parley] Using batch inference with {self.parallel_episodes} parallel episodes")
             episodes_to_run = min(self.parallel_episodes, self.target_episodes - self.episode_count)
+            logger.debug(f"[parley] Running {episodes_to_run} episodes in parallel")
             episodes = self.run_parallel_episodes(episodes_to_run)
+            logger.debug(f"[parley] Completed {len(episodes)} parallel episodes")
 
             # Process all completed episodes
             for episode in episodes:
@@ -719,7 +771,9 @@ class SelfChatWorld(World):
                 self.save_session_metrics()
         else:
             # Original single episode logic
+            logger.debug(f"[parley] Running single episode")
             episode = self.run_episode()
+            logger.debug(f"[parley] Episode completed, adding to batch")
             self.batch_episodes.append(episode)
 
             # Update session metrics DataFrame for single episode
@@ -776,6 +830,7 @@ class SelfChatWorld(World):
                 self.save_session_metrics()
 
             self.episode_count += 1
+            logger.debug(f"[parley] Episode count incremented to {self.episode_count}")
 
             # Log progress
             if self.episode_count % 10 == 0:
@@ -783,7 +838,9 @@ class SelfChatWorld(World):
     
     def episode_done(self):
         """Check if we've generated enough episodes."""
-        return self.episode_count >= self.target_episodes
+        done = self.episode_count >= self.target_episodes
+        logger.debug(f"[episode_done] episode_count={self.episode_count}, target={self.target_episodes}, done={done}")
+        return done
     
     def _save_transcript(self, episode: Dict[str, Any]):
         """Save human-readable transcript of the episode."""

@@ -8,10 +8,6 @@ Worlds:
 1. SelfChatWorld for running seeded negotiation sims against itself.
 2. DialogPartnerWorld - two modes, determined by `mode` flag: one for playing against a RuleAgent prompted with different negotiation profiles, the other for playing against a human via the console (ConsoleAgent).
 
-Tasks (Negotiation Tasks, ParlAI built-in):
-1. Deal or No Deal for teaching basic mechanics of negotaition behavior
-2. Casino for getting a baseline of negotiation language
-
 Teachers:
 1. Teachers will inject custom STATE initial conditions as negotiation prompts for SelfChatWorld and DialogPartnerWorld simulations
 
@@ -20,7 +16,7 @@ Teachers:
 ## Negotiation training plan:
 
 1. Run SelfChatWorld to get a baseline - how good is no-training model at negotiation? 
-2. 0.5 epoch each of Deal or No Deal built-in task and Casino built-in task. Export tasks to JSONL following the SFT template and the model will be trained on a baseline SFT in TRL
+2. 0.3 epoch SFT using craigslist dialogue dataset from huggingface for negotiation baseline learning style and general language patterns. Export tasks to JSONL following the SFT template and the model will be trained on a baseline SFT in TRL
     1. Goal: baseline training of SLM on negotiation behavior and proper dialogue for negotiations. Nudge it in the right direction before making training more specific. Save this as frozen reference for DPO: negotiation_baseline-version_number
 3. Run SelfChatWorld (~1500 episodes). Save JSONL logs. Use minimal state seeds/opening lines with example intent metadata. 
     1. Note - maintain a subsection of the seeds used in this stage for regression control

@@ -20,6 +20,7 @@ from transformers import (
     TrainerCallback
 )
 from trl import SFTTrainer, SFTConfig, DataCollatorForCompletionOnlyLM
+from training.weighted_sft_trainer import WeightedSFTTrainer
 
 # Import existing QLoRA components
 from training.model_loader import ModelLoader
@@ -465,16 +466,28 @@ class SFTTrainingPipeline:
 
         # IMPORTANT: We pass the raw dataset and let the collator handle everything
         # No formatting_func, no dataset_text_field - just the collator
-        trainer = SFTTrainer(
-            model=self.model,
-            tokenizer=self.tokenizer,  # Pass tokenizer for model saving
-            train_dataset=train_dataset,
-            eval_dataset=eval_dataset,
-            args=training_args,
-            data_collator=data_collator,  # JSON collator handles everything
-            # No formatting_func or dataset_text_field
-            # The collator receives raw data and produces input_ids/labels/attention_mask
-        )
+        if self.use_weighted_loss:
+            logger.info("Using WeightedSFTTrainer for weighted loss computation")
+            trainer = WeightedSFTTrainer(
+                model=self.model,
+                tokenizer=self.tokenizer,  # Pass tokenizer for model saving
+                train_dataset=train_dataset,
+                eval_dataset=eval_dataset,
+                args=training_args,
+                data_collator=data_collator,  # Weighted loss collator
+            )
+        else:
+            logger.info("Using standard SFTTrainer")
+            trainer = SFTTrainer(
+                model=self.model,
+                tokenizer=self.tokenizer,  # Pass tokenizer for model saving
+                train_dataset=train_dataset,
+                eval_dataset=eval_dataset,
+                args=training_args,
+                data_collator=data_collator,  # JSON collator handles everything
+                # No formatting_func or dataset_text_field
+                # The collator receives raw data and produces input_ids/labels/attention_mask
+            )
 
         logger.info("Training Configuration:")
         logger.info(f"  - Train examples: {len(train_dataset)}")
@@ -688,15 +701,25 @@ class SFTTrainingPipeline:
                     training_args.per_device_train_batch_size = new_batch_size
                     training_args.gradient_accumulation_steps = new_grad_accum
                     # Recreate trainer with new batch size
-                    trainer = SFTTrainer(
-                        model=self.model,
-                        tokenizer=self.tokenizer,  # Pass tokenizer for model saving
-                        train_dataset=train_dataset,
-                        eval_dataset=eval_dataset,
-                        args=training_args,
-                        data_collator=data_collator,  # Use the JSON collator
-                        # No formatting_func or dataset_text_field
-                    )
+                    if self.use_weighted_loss:
+                        trainer = WeightedSFTTrainer(
+                            model=self.model,
+                            tokenizer=self.tokenizer,  # Pass tokenizer for model saving
+                            train_dataset=train_dataset,
+                            eval_dataset=eval_dataset,
+                            args=training_args,
+                            data_collator=data_collator,  # Use the weighted collator
+                        )
+                    else:
+                        trainer = SFTTrainer(
+                            model=self.model,
+                            tokenizer=self.tokenizer,  # Pass tokenizer for model saving
+                            train_dataset=train_dataset,
+                            eval_dataset=eval_dataset,
+                            args=training_args,
+                            data_collator=data_collator,  # Use the JSON collator
+                            # No formatting_func or dataset_text_field
+                        )
                     train_result = trainer.train()
                 else:
                     raise RuntimeError("Training failed and recovery was not possible")

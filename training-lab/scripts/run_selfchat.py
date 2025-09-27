@@ -16,12 +16,21 @@ from parlai.core.script import ParlaiScript
 from worlds.selfchat_world import SelfChatWorld
 from config.training_config import get_latest_adapter_path
 
-# Set up logging
+# Set up logging with DEBUG level and detailed format
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    level=logging.DEBUG,  # Changed to DEBUG for comprehensive logging
+    format='%(asctime)s - %(name)s - [%(levelname)s] - %(funcName)s:%(lineno)d - %(message)s',
+    handlers=[
+        logging.FileHandler('selfchat_debug.log', mode='w')
+    ]
 )
 logger = logging.getLogger(__name__)
+
+# Ensure all loggers allow DEBUG messages through
+logging.getLogger('worlds.selfchat_world').setLevel(logging.DEBUG)
+logging.getLogger('agents.ollama_wrapper').setLevel(logging.DEBUG)
+logging.getLogger('agents.negotiator_base').setLevel(logging.DEBUG)
+logging.getLogger('tasks.selfplay_teacher').setLevel(logging.DEBUG)
 
 
 class SelfChatRunner(ParlaiScript):
@@ -151,15 +160,26 @@ class SelfChatRunner(ParlaiScript):
             if opt.get('adapter_path'):
                 logger.info(f"Initializing world with adapter: {opt['adapter_path']}")
 
+            logger.debug("Creating SelfChatWorld instance...")
             world = SelfChatWorld(opt)
+            logger.debug("SelfChatWorld instance created successfully")
             
             # Load seeds
-            world.load_state_seeds()
+            logger.debug("Loading state seeds...")
+            seeds, regression = world.load_state_seeds()
+            logger.debug(f"Loaded {len(seeds)} active seeds and {len(regression)} regression seeds")
             
             # Run simulations
             logger.info("Starting episode generation...")
+            episode_num = 0
             while not world.episode_done():
+                episode_num += 1
+                logger.debug(f"\n{'='*50}")
+                logger.debug(f"Starting parley for episode {episode_num}/{opt.get('num_episodes', 1500)}")
+                logger.debug(f"Current episode count: {world.episode_count}")
                 world.parley()
+                logger.debug(f"Completed parley for episode {episode_num}")
+                logger.debug(f"Episode done: {world.episode_done()}")
             
             # Shutdown and save final data
             logger.info("Episode generation complete. Saving final data...")
