@@ -12,6 +12,7 @@ from typing import List, Dict, Tuple
 import matplotlib.pyplot as plt
 import seaborn as sns
 from datetime import datetime
+import argparse
 
 # Add parent directory to path for imports
 sys.path.append(str(Path(__file__).parent.parent))
@@ -22,9 +23,10 @@ from utils.control_function import ControlFunction, NegotiationParams, Negotiati
 class ControlFunctionTester:
     """Test harness for control function with varied scenarios."""
 
-    def __init__(self):
+    def __init__(self, change_note=None):
         self.scenarios = self._create_test_scenarios()
         self.results = []
+        self.change_note = change_note
         # Create unique output directory with datetime
         self.timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.output_dir = f"tests/outputs/run_{self.timestamp}"
@@ -35,6 +37,9 @@ class ControlFunctionTester:
         self.log_file = open(Path(self.output_dir) / 'detailed_test_log.txt', 'w')
         self._log(f"Control Function Test Suite - Run {self.timestamp}\n")
         self._log(f"Output directory: {self.output_dir}\n")
+        if self.change_note:
+            self._log(f"Change Note: {self.change_note}\n")
+            self._log("-" * 60 + "\n")
 
     def _log(self, message: str):
         """Write to both console and log file."""
@@ -366,6 +371,9 @@ class ControlFunctionTester:
         with open(summary_file, 'w') as f:
             f.write("CONTROL FUNCTION TEST SUMMARY\n")
             f.write(f"Test Run: {self.timestamp}\n")
+            if self.change_note:
+                f.write("="*60 + "\n")
+                f.write(f"CHANGE NOTE: {self.change_note}\n")
             f.write("="*60 + "\n\n")
 
             for result in results:
@@ -508,8 +516,8 @@ class ControlFunctionTester:
             'results': serializable_results
         }
 
-        with open(output_file, 'w') as f:
-            json.dump(test_metadata, f, indent=2)
+        #with open(output_file, 'w') as f:
+            #json.dump(test_metadata, f, indent=2)
 
         print(f"\nResults exported to {output_file}")
 
@@ -572,18 +580,25 @@ def run_edge_case_tests():
 
 
 if __name__ == "__main__":
-    # Run main test suite
-    tester = ControlFunctionTester()
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='Control Function Test Suite')
+    parser.add_argument('--note', type=str, help='Change note to document what was modified', default=None)
+    parser.add_argument('--skip-viz', action='store_true', help='Skip visualization generation')
+    args = parser.parse_args()
+
+    # Run main test suite with change note
+    tester = ControlFunctionTester(change_note=args.note)
     results = tester.run_all_tests()
 
     # Run edge case tests
     run_edge_case_tests()
 
-    # Generate visualizations
-    try:
-        tester.visualize_results()
-    except ImportError:
-        print("\n[Note: Visualizations skipped - matplotlib/seaborn not available]")
+    # Generate visualizations unless skipped
+    if not args.skip_viz:
+        try:
+            tester.visualize_results()
+        except ImportError:
+            print("\n[Note: Visualizations skipped - matplotlib/seaborn not available]")
 
     # Export results
     tester.export_results()
@@ -591,3 +606,7 @@ if __name__ == "__main__":
     print("\n" + "="*60)
     print("TEST SUITE COMPLETE")
     print("="*60)
+
+    if args.note:
+        print(f"Change Note: {args.note}")
+    print(f"All outputs saved to: {tester.output_dir}")

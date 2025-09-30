@@ -21,16 +21,16 @@ class NegotiationParams:
     R: int = 20  # Max turns
 
     # Control function weights
-    w_g: float = 0.4  # Price gap weight
-    w_z: float = 0.4  # Price range weight
+    w_g: float = 1  # Price gap weight
+    w_z: float = 1  # Price range weight
     w_x: float = 0.2  # Extra items weight
 
     # Action function parameters
-    ha1: float = 0.3  # Compensate action weight 1
-    ha2: float = 0.2  # Close action weight
-    hz: float = 0.5  # Fine-tune action weight
-    hc: float = 0.6  # Close action multiplier
-    hl: float = 0.8  # Clarify action weight
+    ha1: float = 1  # Compensate action weight 1
+    ha2: float = 0.5  # Close action weight
+    hz: float = 1  # Fine-tune action weight
+    hc: float = 0.5  # Close action multiplier
+    hl: float = 1  # Clarify action weight
     eps: float = 0.01  # Local threshold for clarify
 
 
@@ -184,8 +184,21 @@ class ControlFunction:
         q_extra = cx
 
         # Close action
-        #q_close = self.params.hc * (3 - cg - cz - cx) / 3 + self.params.ha2 * A_k
-        q_close = self.params.hc * (3 - cg - cz - cx) / 3
+        # Modified formula to reduce q_close dominance
+        # Original: q_close = hc * (3 - cg - cz - cx) / 3 + ha2 * A_k
+        # Problem: When cg, cz, cx are small, (3 - 0 - 0 - 0)/3 = 1, making q_close always high
+
+        # New approach: q_close should increase when other actions are small AND we're late in negotiation
+        # This uses the inverse of the sum of other components, scaled by turn progress
+        sum_components = cg + cz + cx
+        max_possible = 3.0  # Maximum theoretical value of sum_components
+
+        if sum_components > 0.1:  # If there's meaningful activity in other areas
+            # Lower close probability when other actions are active
+            q_close = self.params.hc * (1 - sum_components / max_possible) + self.params.ha2 * A_k
+        else:
+            # Only high close probability if we're late in negotiation
+            q_close = self.params.hc * A_k + self.params.ha2 * A_k
 
         # Clarify action
         if state.prev_s is not None:

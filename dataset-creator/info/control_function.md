@@ -17,6 +17,8 @@ Parent control function defined later
 `beta_b`, `beta_s`: parameter defined by personality preset of agent
 `ALPHA`: global simulation parameter to normalize A(p) (defined later)
 `EPSILON`: global threshold parameter
+`DELTA`: >=1 parameter weighing extras by progress
+`GAMMA`: <=0.5 parameter to weigh extras more earlier in negotiation
 `w_g`, `w_z`, `w_x`: float weighting parameters for control function. packaged as dict `weights` with keys wg, wz, wx
 
 ### Turns
@@ -52,9 +54,9 @@ Parent control function defined later
 `z_s` = t.k * max(0, Ps - P.k) / Ps: price range indicator - 0 if within seller accept
 `z_b` = t.k * max(0, P.k - Pb) / Pb: 0 if within buyer accept
 
-`A` = (exp(ALPHA * t.k) - 1) / (exp(ALPHA) - 1): exponential scaling of round pressure
+`A_k` = (exp(ALPHA * t.k) - 1) / (exp(ALPHA) - 1): exponential scaling of round pressure
 
-`x` = 1 - l.k / (n_s.k + n_b.k) if (n_s.k + n_b.k) > 0 else None: if there are extra items, find % left out
+`x` = (1 - l.k / (n_s.k + n_b.k)) * (1 - s)^DELTA if (n_s.k + n_b.k) > 0 else 0: if there are extra items, find % left out
 
 ---
 # Control Function Definition
@@ -62,46 +64,48 @@ Whole function updates every turn k. Each argument besides weights updates for n
 Buyer and seller both have their own control functions 
 Mathematically defined
 
-`V_s(A, g_s, z_s, x, weights)` = A * (weights.wz * z_s + weights.wg * g_s) + weights.wx * x
+`V_s(A_k, g_s, z_s, x, weights)` = A_k * (weights.wz * z_s + weights.wg * g_s) + weights.wx * x
 
-`V_b(A, g_b, z_b, x, weights)` = A * (weights.wz * z_b + weights.wg * g_b) + weights.wx * x
+`V_b(A_k, g_b, z_b, x, weights)` = A_k * (weights.wz * z_b + weights.wg * g_b) + weights.wx * x
 
-`V_max` = weights.wz + weights.wg + weights.wx
+`V_max` = A_k(weights.wz + weights.wg) + weights.wx
 
 ---
 # Action Determining Functions
 Information contained in the control function is used to determine choice of prompt for the agents participating in negotiation. Values are collected and input into a softmax normalization which stochastically determines action choice, weighted by contextual negotiation data
 
 ## Control features
-Important features of `V` which are tracked for determining negotiation actions
+Important features of `V_k` which are tracked for determining negotiation actions
 
-`s` = 1 - `V` / `V_max`: completion percentage. successful negotiation minimizes `V` and maximizes `s`
+`s` = 1 - `V_k` / `V_max`: completion percentage. successful negotiation minimizes `V` and maximizes `s`
+`s_c`: threshold parameter for validity of `q_close` trigger. Should be >= 0.6
 
-`cg_s` = A * weights.wg * g_s 
-`cg_b` = A * weights.wg * g_b
+`cg_s` = A_k * weights.wg * g_s 
+`cg_b` = A_k * weights.wg * g_b
 
-`cz_s` = A * weights.wz * z_s
-`cz_b` = A * weights.wz * z_b
+`cz_s` = A_k * weights.wz * z_s
+`cz_b` = A_k * weights.wz * z_b
 
 `cx`: weights.wx * x
 
-`A` as defined before
+`A_k` as defined before
 
 ## Action functions 
 q-functions which compute values that are input into softmax
 Buyer/seller ambiguous definitions. use buyer/seller specific variables in practice
 
 **Parameters**: 
-- `ha1`, `ha2`, `hz`, `hc`, `hl`: weighting parameters for action functions
+- `ha1`, `ha2`, `hz`, `hc`, `hc2`, `hl`: weighting parameters for action functions
 - `eps`: local threshold parameter
 
-**Compensate price**: `q_compensate` = `cz` * (1 + `ha1` * A)
-**Fine tune price**: `q_finetune` = `cg` * `hz` * `c_z`
+**Compensate price**: `q_compensate` = `cz` * (1 + `ha1` * min(`A_k`, 1 - `A_k`))
+**Fine tune price**: `q_finetune` = `hz` * sqrt(`cz`*`cg`)
 
-**Extra item**: `q_extra` = `cx`
+**Extra item**: `q_extra` = `cx` * `A_k`^`GAMMA`
 
-**Close**: `q_close` = `hc` * (3 - `cg` - `cz` - `cx`) / 3 + `ha2` * `A`
+**Close**: `q_close` = `hc` * `s` + `hc2` * BOOL(|`s_k` - `s_k-1` < `eps`) * BOOL(`s_k` > `s_c`)
 
-**Clarify**: `q_clarify` = `hl` * (|`s.k` - `s.k-1`| < `eps`): expression in parentheses is a boolean {0, 1}. agent would potentially want clarification if no progression made in negotiation
+**Clarify**: `q_clarify` = `hl` * (1 - `s`)
 
-Softmax is computed for each item over the set {`q_compensate`, `q_finetune`, `q_extra`, `q_close`, `q_clarify`} and then next action is based on most likely value
+Softmax is computed for each item over the set {`q_compensate`, `q_finetune`, `q_extra`, `q_close`, `q_clarify`} and then next action is based on most likely value.
+- Softmax temperature should be set to a constant value T = 1.5. 
