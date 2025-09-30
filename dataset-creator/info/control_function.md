@@ -103,3 +103,5 @@ Buyer/seller ambiguous definitions. use buyer/seller specific variables in pract
 **Close**: `q_close` = `hc` * (3 - `cg` - `cz` - `cx`) / 3 + `ha2` * `A`
 
 **Clarify**: `q_clarify` = `hl` * (|`s.k` - `s.k-1`| < `eps`): expression in parentheses is a boolean {0, 1}. agent would potentially want clarification if no progression made in negotiation
+
+Softmax is computed for each item over the set {`q_compensate`, `q_finetune`, `q_extra`, `q_close`, `q_clarify`} and then next action is based on most likely value
