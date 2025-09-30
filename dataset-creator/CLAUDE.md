@@ -22,3 +22,4 @@ This module will be designed to create datasets to be used in the existing in ~/
 - SFT trainer (./training/sft_trainer.py)
 
 training-lab is at the same level of the project as dataset-creator. Files from the Intentia project can be imported as packages, so in this project (dataset-creator) we should import existing modules like selfchat_world (avoiding redundant code) to facilitate negotiation that will be recorded for training data. the data generated here should be packaged nicely so that it can be imported cleanly into sft_trainer
+- to activate the venv that holds project files: `source ~/code/Intentia/.venv_proj/bin/activate`
