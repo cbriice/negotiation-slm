@@ -6,11 +6,9 @@ Tests various negotiation scenarios with diverse dummy data.
 import sys
 import numpy as np
 from pathlib import Path
-import json
 import pandas as pd
-from typing import List, Dict, Tuple
+from typing import List, Dict
 import matplotlib.pyplot as plt
-import seaborn as sns
 from datetime import datetime
 import argparse
 
@@ -496,9 +494,9 @@ class ControlFunctionTester:
         def convert_to_native(obj):
             if isinstance(obj, np.ndarray):
                 return obj.tolist()
-            elif isinstance(obj, (np.int64, np.int32)):
+            elif isinstance(obj, (np.integer)):
                 return int(obj)
-            elif isinstance(obj, (np.float64, np.float32)):
+            elif isinstance(obj, (np.floating)):
                 return float(obj)
             elif isinstance(obj, dict):
                 return {k: convert_to_native(v) for k, v in obj.items()}

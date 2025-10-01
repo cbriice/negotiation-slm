@@ -28,7 +28,7 @@ class NegotiationParams:
     w_x: float = 0.2  # Extra items weight
 
     # Action function parameters
-    ha1: float = 1  # Compensate action weight 1
+    ETA: float = 0.3  # Parameter for q_compensate tuning (0 <= ETA <= 0.5)
     hz: float = 1  # Fine-tune action weight
     hc: float = 0.5  # Close action multiplier
     hc2: float = 0.5  # Close action weight 2
@@ -116,9 +116,9 @@ class ControlFunction:
             g = g_s
             z = z_s
 
-        # Preliminary V_k without x term
-        V_k_prelim = A_k * (self.params.w_z * z + self.params.w_g * g)
-        V_max_prelim = A_k * (self.params.w_z + self.params.w_g) + self.params.w_x
+        # Preliminary V_k without x term (simplified - no A_k)
+        V_k_prelim = self.params.w_z * z + self.params.w_g * g
+        V_max_prelim = self.params.w_z + self.params.w_g
         s = 1 - V_k_prelim / V_max_prelim if V_max_prelim > 0 else 0
 
         # Extra items percentage left out with progress weighting
@@ -157,15 +157,15 @@ class ControlFunction:
             g = subfunctions['g_s']
             z = subfunctions['z_s']
 
-        # Compute V_k (turn-dependent control value)
-        V_k = A_k * (self.params.w_z * z + self.params.w_g * g) + self.params.w_x * x
+        # Compute V_k (simplified - no A_k multiplier, no x term)
+        V_k = self.params.w_z * z + self.params.w_g * g
 
-        # Compute V_max (now dependent on A_k)
-        V_max = A_k * (self.params.w_z + self.params.w_g) + self.params.w_x
+        # Compute V_max (simplified - no A_k dependency, no x term)
+        V_max = self.params.w_z + self.params.w_g
 
-        # Control features
-        cg = A_k * self.params.w_g * g
-        cz = A_k * self.params.w_z * z
+        # Control features (simplified - no A_k in cg and cz)
+        cg = self.params.w_g * g
+        cz = self.params.w_z * z
         cx = self.params.w_x * x
 
         # Completion percentage
@@ -190,8 +190,8 @@ class ControlFunction:
         s = features['s']
         A_k = features['A_k']
 
-        # Compensate price action (using min(A_k, 1-A_k) for balanced weighting)
-        q_compensate = cz * (1 + self.params.ha1 * min(A_k, 1 - A_k))
+        # Compensate price action (using ETA parameter)
+        q_compensate = cz * (1 + self.params.ETA)
 
         # Fine tune price action (using sqrt for geometric mean-like behavior)
         q_finetune = self.params.hz * np.sqrt(cz * cg) if (cz * cg) > 0 else 0
@@ -237,7 +237,7 @@ class ControlFunction:
         return dict(zip(actions, probabilities))
 
     def evaluate(self, state: NegotiationState, is_buyer: bool = True,
-                temperature: float = 1.5) -> Dict[str, any]:
+                temperature: float = None) -> Dict[str, any]:
         """
         Full evaluation of control function for a given state.
 
@@ -256,6 +256,12 @@ class ControlFunction:
         subfunctions = self.compute_subfunctions(state, base_values, is_buyer)
         V_k, V_max, features = self.compute_control_values(subfunctions, is_buyer)
         q_values = self.compute_action_q_values(features, state)
+
+        # Dynamic softmax temperature based on s
+        if temperature is None:
+            s = features['s']
+            temperature = 1.5 if s < self.params.s_c else 0.75
+
         action_probs = self.softmax(q_values, temperature)
 
         # Get recommended action
