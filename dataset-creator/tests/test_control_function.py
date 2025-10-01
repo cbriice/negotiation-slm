@@ -148,7 +148,7 @@ class ControlFunctionTester:
                 w_g=0.3,
                 w_z=0.3,
                 w_x=0.4,
-                ha2=0.5,      # Higher close action weight
+                hc2=0.5,      # Close action weight 2
                 hc=0.8,       # Higher close multiplier
                 R=10
             ),

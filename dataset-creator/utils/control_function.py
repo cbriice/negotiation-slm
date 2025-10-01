@@ -18,6 +18,8 @@ class NegotiationParams:
     beta_s: float  # Seller personality parameter
     ALPHA: float = 5.0  # Global exponential scaling parameter
     EPSILON: float = 1e-6  # Global threshold parameter
+    DELTA: float = 1.0  # >=1 parameter weighing extras by progress
+    GAMMA: float = 0.5  # <=0.5 parameter to weigh extras more earlier in negotiation
     R: int = 20  # Max turns
 
     # Control function weights
@@ -27,11 +29,12 @@ class NegotiationParams:
 
     # Action function parameters
     ha1: float = 1  # Compensate action weight 1
-    ha2: float = 0.5  # Close action weight
     hz: float = 1  # Fine-tune action weight
     hc: float = 0.5  # Close action multiplier
+    hc2: float = 0.5  # Close action weight 2
     hl: float = 1  # Clarify action weight
-    eps: float = 0.01  # Local threshold for clarify
+    eps: float = 0.01  # Local threshold for action functions
+    s_c: float = 0.6  # Threshold for q_close validity (should be >= 0.6)
 
 
 @dataclass
@@ -87,8 +90,8 @@ class ControlFunction:
             'm_b': m_b
         }
 
-    def compute_subfunctions(self, state: NegotiationState, base_values: Dict[str, float]) -> Dict[str, float]:
-        """Compute subfunctions g, z, A, and x."""
+    def compute_subfunctions(self, state: NegotiationState, base_values: Dict[str, float], is_buyer: bool) -> Dict[str, float]:
+        """Compute subfunctions g, z, A, and x (x requires s so needs is_buyer)."""
         t_k = base_values['t_k']
 
         # Price gap functions
@@ -105,10 +108,23 @@ class ControlFunction:
         else:
             A_k = t_k  # Linear fallback if ALPHA is 0
 
-        # Extra items percentage left out
+        # Compute preliminary V_k to get s for x calculation
+        if is_buyer:
+            g = g_b
+            z = z_b
+        else:
+            g = g_s
+            z = z_s
+
+        # Preliminary V_k without x term
+        V_k_prelim = A_k * (self.params.w_z * z + self.params.w_g * g)
+        V_max_prelim = A_k * (self.params.w_z + self.params.w_g) + self.params.w_x
+        s = 1 - V_k_prelim / V_max_prelim if V_max_prelim > 0 else 0
+
+        # Extra items percentage left out with progress weighting
         total_extras = state.n_s_k + state.n_b_k
         if total_extras > 0:
-            x = 1 - state.l_k / total_extras
+            x = (1 - state.l_k / total_extras) * pow(1 - s, self.params.DELTA)
         else:
             x = 0  # No extras available
 
@@ -144,8 +160,8 @@ class ControlFunction:
         # Compute V_k (turn-dependent control value)
         V_k = A_k * (self.params.w_z * z + self.params.w_g * g) + self.params.w_x * x
 
-        # Compute V_max
-        V_max = self.params.w_z + self.params.w_g + self.params.w_x
+        # Compute V_max (now dependent on A_k)
+        V_max = A_k * (self.params.w_z + self.params.w_g) + self.params.w_x
 
         # Control features
         cg = A_k * self.params.w_g * g
@@ -174,38 +190,28 @@ class ControlFunction:
         s = features['s']
         A_k = features['A_k']
 
-        # Compensate price action
-        q_compensate = cz * (1 + self.params.ha1 * A_k)
+        # Compensate price action (using min(A_k, 1-A_k) for balanced weighting)
+        q_compensate = cz * (1 + self.params.ha1 * min(A_k, 1 - A_k))
 
-        # Fine tune price action
-        q_finetune = cg * self.params.hz * cz
+        # Fine tune price action (using sqrt for geometric mean-like behavior)
+        q_finetune = self.params.hz * np.sqrt(cz * cg) if (cz * cg) > 0 else 0
 
-        # Extra item action
-        q_extra = cx
+        # Extra item action (weighted more earlier in negotiation with A_k^GAMMA)
+        q_extra = cx * pow(A_k, self.params.GAMMA)
 
-        # Close action
-        # Modified formula to reduce q_close dominance
-        # Original: q_close = hc * (3 - cg - cz - cx) / 3 + ha2 * A_k
-        # Problem: When cg, cz, cx are small, (3 - 0 - 0 - 0)/3 = 1, making q_close always high
-
-        # New approach: q_close should increase when other actions are small AND we're late in negotiation
-        # This uses the inverse of the sum of other components, scaled by turn progress
-        sum_components = cg + cz + cx
-        max_possible = 3.0  # Maximum theoretical value of sum_components
-
-        if sum_components > 0.1:  # If there's meaningful activity in other areas
-            # Lower close probability when other actions are active
-            q_close = self.params.hc * (1 - sum_components / max_possible) + self.params.ha2 * A_k
-        else:
-            # Only high close probability if we're late in negotiation
-            q_close = self.params.hc * A_k + self.params.ha2 * A_k
-
-        # Clarify action
+        # Close action (new formula based on s and progression)
+        # Check if s has changed enough and if s is above threshold
         if state.prev_s is not None:
-            clarify_condition = abs(s - state.prev_s) < self.params.eps
+            s_change_small = abs(s - state.prev_s) < self.params.eps
+            s_above_threshold = s > self.params.s_c
+            close_bonus = 1.0 if (s_change_small and s_above_threshold) else 0.0
         else:
-            clarify_condition = False
-        q_clarify = self.params.hl * (1.0 if clarify_condition else 0.0)
+            close_bonus = 0.0
+
+        q_close = self.params.hc * s + self.params.hc2 * close_bonus
+
+        # Clarify action (based on lack of progress, i.e., 1-s)
+        q_clarify = self.params.hl * (1 - s)
 
         return {
             'compensate': q_compensate,
@@ -215,7 +221,7 @@ class ControlFunction:
             'clarify': q_clarify
         }
 
-    def softmax(self, q_values: Dict[str, float], temperature: float = 1.0) -> Dict[str, float]:
+    def softmax(self, q_values: Dict[str, float], temperature: float = 1.5) -> Dict[str, float]:
         """Apply softmax to q-values to get action probabilities."""
         # Convert to numpy array for computation
         actions = list(q_values.keys())
@@ -231,7 +237,7 @@ class ControlFunction:
         return dict(zip(actions, probabilities))
 
     def evaluate(self, state: NegotiationState, is_buyer: bool = True,
-                temperature: float = 1.0) -> Dict[str, any]:
+                temperature: float = 1.5) -> Dict[str, any]:
         """
         Full evaluation of control function for a given state.
 
@@ -247,7 +253,7 @@ class ControlFunction:
         """
         # Compute all intermediate values
         base_values = self.compute_base_values(state)
-        subfunctions = self.compute_subfunctions(state, base_values)
+        subfunctions = self.compute_subfunctions(state, base_values, is_buyer)
         V_k, V_max, features = self.compute_control_values(subfunctions, is_buyer)
         q_values = self.compute_action_q_values(features, state)
         action_probs = self.softmax(q_values, temperature)

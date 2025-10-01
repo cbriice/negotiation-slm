@@ -49,7 +49,7 @@ Parent control function defined later
 ## Subfunction definitions
 
 `g_s` = max(0, m_s): price gap for seller. seller would rather price be a little above minimum than close to minimum
-`g_b` = max(0m, m_b): price gap for buyer. vice versa logic
+`g_b` = max(0, m_b): price gap for buyer. vice versa logic
 
 `z_s` = t.k * max(0, Ps - P.k) / Ps: price range indicator - 0 if within seller accept
 `z_b` = t.k * max(0, P.k - Pb) / Pb: 0 if within buyer accept
@@ -64,11 +64,11 @@ Whole function updates every turn k. Each argument besides weights updates for n
 Buyer and seller both have their own control functions 
 Mathematically defined
 
-`V_s(A_k, g_s, z_s, x, weights)` = A_k * (weights.wz * z_s + weights.wg * g_s) + weights.wx * x
+`V_s(g_s, z_s, weights)` = weights.wz * z_s + weights.wg * g_s
 
-`V_b(A_k, g_b, z_b, x, weights)` = A_k * (weights.wz * z_b + weights.wg * g_b) + weights.wx * x
+`V_b(g_b, z_b, weights)` = weights.wz * z_b + weights.wg * g_b
 
-`V_max` = A_k(weights.wz + weights.wg) + weights.wx
+`V_max` = weights.wz + weights.wg
 
 ---
 # Action Determining Functions
@@ -78,13 +78,12 @@ Information contained in the control function is used to determine choice of pro
 Important features of `V_k` which are tracked for determining negotiation actions
 
 `s` = 1 - `V_k` / `V_max`: completion percentage. successful negotiation minimizes `V` and maximizes `s`
-`s_c`: threshold parameter for validity of `q_close` trigger. Should be >= 0.6
 
-`cg_s` = A_k * weights.wg * g_s 
-`cg_b` = A_k * weights.wg * g_b
+`cg_s` = weights.wg * g_s
+`cg_b` = weights.wg * g_b
 
-`cz_s` = A_k * weights.wz * z_s
-`cz_b` = A_k * weights.wz * z_b
+`cz_s` = weights.wz * z_s
+`cz_b` = weights.wz * z_b
 
 `cx`: weights.wx * x
 
@@ -97,8 +96,10 @@ Buyer/seller ambiguous definitions. use buyer/seller specific variables in pract
 **Parameters**: 
 - `ha1`, `ha2`, `hz`, `hc`, `hc2`, `hl`: weighting parameters for action functions
 - `eps`: local threshold parameter
+- `ETA`: parameter to allow independent tuning of `q_compensate`; 0<=`ETA`<=0.5
+- `s_c`: threshold parameter for validity of `q_close` trigger. Should be >= 0.6
 
-**Compensate price**: `q_compensate` = `cz` * (1 + `ha1` * min(`A_k`, 1 - `A_k`))
+**Compensate price**: `q_compensate` = `cz` * (1 + `ETA`)
 **Fine tune price**: `q_finetune` = `hz` * sqrt(`cz`*`cg`)
 
 **Extra item**: `q_extra` = `cx` * `A_k`^`GAMMA`
@@ -108,4 +109,7 @@ Buyer/seller ambiguous definitions. use buyer/seller specific variables in pract
 **Clarify**: `q_clarify` = `hl` * (1 - `s`)
 
 Softmax is computed for each item over the set {`q_compensate`, `q_finetune`, `q_extra`, `q_close`, `q_clarify`} and then next action is based on most likely value.
-- Softmax temperature should be set to a constant value T = 1.5. 
+
+**Softmax Temperature calculation** 
+When `s` < `s_c`, `softmax_temp` = 1.5
+When `s` > `s_c`, `softmax_temp` = 0.75
