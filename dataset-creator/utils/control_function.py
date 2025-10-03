@@ -74,8 +74,8 @@ class ControlFunction:
         if delta_P > self.params.EPSILON:
             mstar_s = max(0, state.P_k - P_s)
             mstar_b = max(0, P_b - state.P_k)
-            m_s = mstar_s / delta_P
-            m_b = mstar_b / delta_P
+            m_s = 2 * mstar_s / delta_P
+            m_b = 2 * mstar_b / delta_P
         else:
             # Prices are essentially equal
             m_s = -1000
@@ -98,9 +98,17 @@ class ControlFunction:
         g_s = max(0, base_values['m_s'])
         g_b = max(0, base_values['m_b'])
 
-        # Price range indicators
-        z_s = t_k * max(0, state.Ps - state.P_k) / state.Ps if state.Ps > 0 else 0
-        z_b = t_k * max(0, state.P_k - state.Pb) / state.Pb if state.Pb > 0 else 0
+        # Price range indicators using lambda normalization
+        delta_Ps = max(0, state.Ps - state.P_k)
+        delta_Pb = max(0, state.P_k - state.Pb)
+        lambda_val = max(delta_Ps, delta_Pb)
+
+        if lambda_val > 0:
+            z_s = delta_Ps / lambda_val
+            z_b = delta_Pb / lambda_val
+        else:
+            z_s = 0
+            z_b = 0
 
         # Exponential scaling of round pressure (turn-dependent)
         if self.params.ALPHA != 0:

@@ -55,168 +55,184 @@ class ControlFunctionTester:
         scenarios = []
 
         # Scenario 1: Balanced negotiation with reasonable gap
+        params_1 = NegotiationParams(
+            beta_b=-0.1,  # Buyer willing to pay 10% less than max
+            beta_s=0.1,   # Seller wants 10% more than min
+            ALPHA=5.0,
+            w_g=0.4,
+            w_z=0.4,
+            w_x=0.2,
+            R=20
+        )
         scenarios.append({
             'name': 'Balanced_Negotiation',
             'description': 'Both parties have reasonable expectations with moderate gap',
-            'params': NegotiationParams(
-                beta_b=-0.1,  # Buyer willing to pay 10% less than max
-                beta_s=0.1,   # Seller wants 10% more than min
-                ALPHA=5.0,
-                w_g=0.4,
-                w_z=0.4,
-                w_x=0.2,
-                R=20
-            ),
+            'params': params_1,
             'states': self._generate_negotiation_sequence(
                 Ps=100, Pb=150, initial_price=130,
                 n_extras_buyer=3, n_extras_seller=2,
-                num_turns=20, price_adjustment='converging'
+                num_turns=20, price_adjustment='converging',
+                params=params_1
             )
         })
 
         # Scenario 2: Aggressive buyer vs firm seller
+        params_2 = NegotiationParams(
+            beta_b=-0.3,  # Buyer wants 30% discount
+            beta_s=0.05,  # Seller slightly flexible
+            ALPHA=7.0,    # Higher pressure
+            w_g=0.3,
+            w_z=0.5,      # Emphasize price range
+            w_x=0.2,
+            R=25
+        )
         scenarios.append({
             'name': 'Aggressive_Buyer',
             'description': 'Buyer pushes hard for low price, seller stands firm',
-            'params': NegotiationParams(
-                beta_b=-0.3,  # Buyer wants 30% discount
-                beta_s=0.05,  # Seller slightly flexible
-                ALPHA=7.0,    # Higher pressure
-                w_g=0.3,
-                w_z=0.5,      # Emphasize price range
-                w_x=0.2,
-                R=25
-            ),
+            'params': params_2,
             'states': self._generate_negotiation_sequence(
                 Ps=200, Pb=250, initial_price=240,
                 n_extras_buyer=5, n_extras_seller=3,
-                num_turns=25, price_adjustment='slow_descent'
+                num_turns=25, price_adjustment='slow_descent',
+                params=params_2
             )
         })
 
         # Scenario 3: Wide price gap with extras negotiation
+        params_3 = NegotiationParams(
+            beta_b=-0.15,
+            beta_s=0.2,   # Seller wants significant premium
+            ALPHA=4.0,
+            w_g=0.2,
+            w_z=0.3,
+            w_x=0.5,      # Emphasize extras
+            R=30
+        )
         scenarios.append({
             'name': 'Wide_Gap_Extra_Focus',
             'description': 'Large price gap, negotiation focuses on extra items',
-            'params': NegotiationParams(
-                beta_b=-0.15,
-                beta_s=0.2,   # Seller wants significant premium
-                ALPHA=4.0,
-                w_g=0.2,
-                w_z=0.3,
-                w_x=0.5,      # Emphasize extras
-                R=30
-            ),
+            'params': params_3,
             'states': self._generate_negotiation_sequence(
                 Ps=500, Pb=700, initial_price=650,
                 n_extras_buyer=10, n_extras_seller=8,
                 num_turns=30, price_adjustment='oscillating',
+                params=params_3,
                 extras_pattern='increasing'
             )
         })
 
         # Scenario 4: Near-deadlock situation
+        params_4 = NegotiationParams(
+            beta_b=0.0,   # Buyer at max limit
+            beta_s=0.3,   # Seller wants high premium
+            ALPHA=8.0,    # Very high pressure
+            w_g=0.5,
+            w_z=0.4,
+            w_x=0.1,
+            R=15
+        )
         scenarios.append({
             'name': 'Near_Deadlock',
             'description': 'Parties are far apart with little movement',
-            'params': NegotiationParams(
-                beta_b=0.0,   # Buyer at max limit
-                beta_s=0.3,   # Seller wants high premium
-                ALPHA=8.0,    # Very high pressure
-                w_g=0.5,
-                w_z=0.4,
-                w_x=0.1,
-                R=15
-            ),
+            'params': params_4,
             'states': self._generate_negotiation_sequence(
                 Ps=1000, Pb=1100, initial_price=1050,
                 n_extras_buyer=2, n_extras_seller=1,
-                num_turns=15, price_adjustment='stuck'
+                num_turns=15, price_adjustment='stuck',
+                params=params_4
             )
         })
 
         # Scenario 5: Quick convergence scenario
+        params_5 = NegotiationParams(
+            beta_b=-0.05,
+            beta_s=0.0,   # Seller at minimum
+            ALPHA=3.0,    # Lower pressure
+            w_g=0.3,
+            w_z=0.3,
+            w_x=0.4,
+            hc2=0.5,      # Close action weight 2
+            hc=0.8,       # Higher close multiplier
+            R=10
+        )
         scenarios.append({
             'name': 'Quick_Convergence',
             'description': 'Both parties eager to close, rapid convergence',
-            'params': NegotiationParams(
-                beta_b=-0.05,
-                beta_s=0.0,   # Seller at minimum
-                ALPHA=3.0,    # Lower pressure
-                w_g=0.3,
-                w_z=0.3,
-                w_x=0.4,
-                hc2=0.5,      # Close action weight 2
-                hc=0.8,       # Higher close multiplier
-                R=10
-            ),
+            'params': params_5,
             'states': self._generate_negotiation_sequence(
                 Ps=50, Pb=80, initial_price=65,
                 n_extras_buyer=1, n_extras_seller=1,
-                num_turns=10, price_adjustment='fast_converge'
+                num_turns=10, price_adjustment='fast_converge',
+                params=params_5
             )
         })
 
         # Scenario 6: Extreme personalities
+        params_6 = NegotiationParams(
+            beta_b=-0.5,  # Buyer wants 50% off
+            beta_s=0.5,   # Seller wants 50% premium
+            ALPHA=10.0,   # Extreme pressure
+            w_g=0.4,
+            w_z=0.4,
+            w_x=0.2,
+            hl=1.0,       # High clarify weight
+            eps=0.001,    # Tight clarify threshold
+            R=40
+        )
         scenarios.append({
             'name': 'Extreme_Personalities',
             'description': 'Very aggressive buyer meets very greedy seller',
-            'params': NegotiationParams(
-                beta_b=-0.5,  # Buyer wants 50% off
-                beta_s=0.5,   # Seller wants 50% premium
-                ALPHA=10.0,   # Extreme pressure
-                w_g=0.4,
-                w_z=0.4,
-                w_x=0.2,
-                hl=1.0,       # High clarify weight
-                eps=0.001,    # Tight clarify threshold
-                R=40
-            ),
+            'params': params_6,
             'states': self._generate_negotiation_sequence(
                 Ps=300, Pb=400, initial_price=350,
                 n_extras_buyer=7, n_extras_seller=5,
-                num_turns=40, price_adjustment='volatile'
+                num_turns=40, price_adjustment='volatile',
+                params=params_6
             )
         })
 
         # Scenario 7: No extras available
+        params_7 = NegotiationParams(
+            beta_b=-0.1,
+            beta_s=0.1,
+            ALPHA=5.0,
+            w_g=0.5,      # More weight on price gap
+            w_z=0.5,      # More weight on price range
+            w_x=0.0,      # No weight on extras
+            R=20
+        )
         scenarios.append({
             'name': 'No_Extras',
             'description': 'Pure price negotiation without extra items',
-            'params': NegotiationParams(
-                beta_b=-0.1,
-                beta_s=0.1,
-                ALPHA=5.0,
-                w_g=0.5,      # More weight on price gap
-                w_z=0.5,      # More weight on price range
-                w_x=0.0,      # No weight on extras
-                R=20
-            ),
+            'params': params_7,
             'states': self._generate_negotiation_sequence(
                 Ps=150, Pb=200, initial_price=180,
                 n_extras_buyer=0, n_extras_seller=0,
-                num_turns=20, price_adjustment='linear'
+                num_turns=20, price_adjustment='linear',
+                params=params_7
             )
         })
 
         # Scenario 8: Edge case - zero price gap
+        params_8 = NegotiationParams(
+            beta_b=-0.2,
+            beta_s=-0.2,  # Both want same adjusted price
+            ALPHA=5.0,
+            EPSILON=1e-6,
+            w_g=0.4,
+            w_z=0.4,
+            w_x=0.2,
+            R=10
+        )
         scenarios.append({
             'name': 'Zero_Gap',
             'description': 'Adjusted prices are identical (edge case)',
-            'params': NegotiationParams(
-                beta_b=-0.2,
-                beta_s=-0.2,  # Both want same adjusted price
-                ALPHA=5.0,
-                EPSILON=1e-6,
-                w_g=0.4,
-                w_z=0.4,
-                w_x=0.2,
-                R=10
-            ),
+            'params': params_8,
             'states': self._generate_negotiation_sequence(
                 Ps=100, Pb=100, initial_price=100,
                 n_extras_buyer=2, n_extras_seller=2,
-                num_turns=10, price_adjustment='static'
+                num_turns=10, price_adjustment='static',
+                params=params_8
             )
         })
 
@@ -225,10 +241,16 @@ class ControlFunctionTester:
     def _generate_negotiation_sequence(self, Ps: float, Pb: float, initial_price: float,
                                       n_extras_buyer: int, n_extras_seller: int,
                                       num_turns: int, price_adjustment: str,
+                                      params: NegotiationParams,
                                       extras_pattern: str = 'static') -> List[NegotiationState]:
         """Generate a sequence of negotiation states for testing."""
         states = []
-        prev_s = None
+        prev_s_buyer = None
+        prev_s_seller = None
+
+        # Create a control function instance for calculating s values
+        # Use the actual scenario parameters
+        cf = ControlFunction(params)
 
         for turn in range(num_turns):
             # Calculate price based on adjustment pattern
@@ -274,6 +296,8 @@ class ControlFunctionTester:
             else:  # static
                 l_k = min(2, n_extras_buyer + n_extras_seller) if turn > 5 else 0
 
+            # Create states with appropriate prev_s for buyer and seller
+            # Note: prev_s will be set properly during evaluation in run_scenario_tests
             state = NegotiationState(
                 r=turn,
                 Ps=Ps,
@@ -282,13 +306,29 @@ class ControlFunctionTester:
                 n_b_k=n_extras_buyer,
                 n_s_k=n_extras_seller,
                 l_k=l_k,
-                prev_s=prev_s
+                prev_s=None  # Will be set properly during evaluation
             )
+
             states.append(state)
 
-            # Update prev_s for next iteration (would normally come from control function)
-            # Using a dummy value here
-            prev_s = 0.5 + turn * 0.02
+            # Calculate s values for next iteration using the control function
+            # This ensures we're using the proper control function calculations
+            temp_state = NegotiationState(
+                r=turn,
+                Ps=Ps,
+                Pb=Pb,
+                P_k=price,
+                n_b_k=n_extras_buyer,
+                n_s_k=n_extras_seller,
+                l_k=l_k,
+                prev_s=prev_s_buyer
+            )
+            buyer_eval = cf.evaluate(temp_state, is_buyer=True)
+            prev_s_buyer = buyer_eval['features']['s']
+
+            temp_state.prev_s = prev_s_seller
+            seller_eval = cf.evaluate(temp_state, is_buyer=False)
+            prev_s_seller = seller_eval['features']['s']
 
         return states
 
@@ -307,11 +347,28 @@ class ControlFunctionTester:
             'turns': []
         }
 
+        # Track s values for buyer and seller separately
+        prev_s_buyer = None
+        prev_s_seller = None
+
         for state in scenario['states']:
             # Test for both buyer and seller
             for is_buyer in [True, False]:
                 role = 'Buyer' if is_buyer else 'Seller'
+
+                # Set the appropriate prev_s for this role
+                if is_buyer:
+                    state.prev_s = prev_s_buyer
+                else:
+                    state.prev_s = prev_s_seller
+
                 evaluation = cf.evaluate(state, is_buyer)
+
+                # Update prev_s for next turn
+                if is_buyer:
+                    prev_s_buyer = evaluation['features']['s']
+                else:
+                    prev_s_seller = evaluation['features']['s']
 
                 turn_result = {
                     'turn': state.r,
@@ -321,7 +378,8 @@ class ControlFunctionTester:
                     'completion': evaluation['features']['s'],
                     'action_probs': evaluation['action_probs'],
                     'recommended_action': evaluation['recommended_action'],
-                    'q_values': evaluation['q_values']
+                    'q_values': evaluation['q_values'],
+                    'prev_s': state.prev_s  # Track prev_s for debugging
                 }
                 results['turns'].append(turn_result)
 
@@ -336,6 +394,14 @@ class ControlFunctionTester:
         self._log(f"\nTurn {turn} - {role}:\n")
         self._log(f"  Control Value (V_k): {evaluation['control_value']:.4f}\n")
         self._log(f"  Completion (s): {evaluation['features']['s']:.2%}\n")
+
+        # Print raw control feature values
+        self._log(f"  Raw Control Features:\n")
+        self._log(f"    cg (weighted gap):     {evaluation['features']['cg']:.4f}\n")
+        self._log(f"    cz (weighted range):   {evaluation['features']['cz']:.4f}\n")
+        self._log(f"    cx (weighted extras):  {evaluation['features']['cx']:.4f}\n")
+        self._log(f"    A_k (round pressure):  {evaluation['features']['A_k']:.4f}\n")
+
         self._log(f"  Recommended Action: {evaluation['recommended_action']}\n")
         self._log(f"  Action Probabilities:\n")
         for action, prob in evaluation['action_probs'].items():

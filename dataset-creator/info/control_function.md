@@ -42,8 +42,8 @@ Parent control function defined later
 `delta_P` = abs(P_s - P_b): gap between adjusted buyer max/seller min
 `mstar_s` = max(0, P_k - P_s): gap of current price and seller min
 `mstar_b` = max(0, P_b - P_k): gap of current price and buyer max
-`m_s` = mstar_s / delta_P if delta_P > EPSILON else -1000: -1000 a placeholder indicator of equivalent prices. normalizes mstar to gap
-`m_b` = mstar_b / delta_P if delta_P > EPSILON else -1000
+`m_s` = 2 * mstar_s / (delta_P) if delta_P > EPSILON else -1000: -1000 a placeholder indicator of equivalent prices. normalizes mstar to gap
+`m_b` = 2 * mstar_b / (delta_P) if delta_P > EPSILON else -1000
 
 ---
 ## Subfunction definitions
@@ -51,8 +51,11 @@ Parent control function defined later
 `g_s` = max(0, m_s): price gap for seller. seller would rather price be a little above minimum than close to minimum
 `g_b` = max(0, m_b): price gap for buyer. vice versa logic
 
-`z_s` = t.k * max(0, Ps - P.k) / Ps: price range indicator - 0 if within seller accept
-`z_b` = t.k * max(0, P.k - Pb) / Pb: 0 if within buyer accept
+`delta_Ps` = max(0, Ps - P.k)
+`delta_Pb` = max(0, P.k - Pb)
+`lambda` = max(delta_Ps, delta_Pb)
+`z_s` = max(0, Ps - P.k) / lambda: price range indicator - 0 if within seller accept
+`z_b` = max(0, P.k - Pb) / lambda: 0 if within buyer accept
 
 `A_k` = (exp(ALPHA * t.k) - 1) / (exp(ALPHA) - 1): exponential scaling of round pressure
 
@@ -94,7 +97,7 @@ q-functions which compute values that are input into softmax
 Buyer/seller ambiguous definitions. use buyer/seller specific variables in practice
 
 **Parameters**: 
-- `ha1`, `ha2`, `hz`, `hc`, `hc2`, `hl`: weighting parameters for action functions
+- `hz`, `hc`, `hc2`, `hl`: weighting parameters for action functions
 - `eps`: local threshold parameter
 - `ETA`: parameter to allow independent tuning of `q_compensate`; 0<=`ETA`<=0.5
 - `s_c`: threshold parameter for validity of `q_close` trigger. Should be >= 0.6
