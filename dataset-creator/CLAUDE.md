@@ -7,6 +7,9 @@ The overall purpose is to create a comprehensive negotiation dataset to train a 
 
 # Architecture notes
 
+## Simulation architecture
+See info/sim_documentation.md. 
+
 ## Control function
 - Negotiation is guided by a control function (details in info/control_function.md)
 - This control function uses stochastic softmax-normalized distributions derived from negotiation live data and seeds to determine which action should come next 

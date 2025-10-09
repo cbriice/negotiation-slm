@@ -15,6 +15,7 @@ Parent control function defined later
 
 ### Parameters
 `beta_b`, `beta_s`: parameter defined by personality preset of agent
+  - note: `beta_b` > 0, `beta_s` < 0
 `ALPHA`: global simulation parameter to normalize A(p) (defined later)
 `EPSILON`: global threshold parameter
 `DELTA`: >=1 parameter weighing extras by progress
@@ -99,11 +100,11 @@ Buyer/seller ambiguous definitions. use buyer/seller specific variables in pract
 **Parameters**: 
 - `hz`, `hc`, `hc2`, `hl`: weighting parameters for action functions
 - `eps`: local threshold parameter
-- `ETA`: parameter to allow independent tuning of `q_compensate`; 0<=`ETA`<=0.5
+- `RHO`: parameter to allow independent tuning of `q_compensate`; 0<=`RHO`<=0.5
 - `s_c`: threshold parameter for validity of `q_close` trigger. Should be >= 0.6
 
-**Compensate price**: `q_compensate` = `cz` * (1 + `ETA`)
-**Fine tune price**: `q_finetune` = `hz` * sqrt(`cz`*`cg`)
+**Compensate price**: `q_compensate` = `cz` * (1 + `RHO`)
+**Fine tune price**: `q_finetune` = `hz` * `cg`
 
 **Extra item**: `q_extra` = `cx` * `A_k`^`GAMMA`
 
