@@ -71,3 +71,6 @@ Presets:
 
 ### Prompt contextualization
 Each prompt given to the models corresponds to an action chosen by the control function, and each action has a goal. In order to contextualize prompt selection, track deltas for each control feature (`cz`, `cg`, etc) and use these to define success of an action. If an action is successful (delta is positive above some threshold), add a factor that reduces the probability of it being selected for the next action by lowering its scalar value before it gets put into softmax. 
+
+**Prompt duplication prevention**
+Once a prompt has been used for one side in a particular negotiation dialog, it should be removed from the pool of available prompts for the next turn corresponding to that action to avoid repetition. 
