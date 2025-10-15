@@ -7,7 +7,7 @@ Also contains general response prompts for forced conversation flow.
 from utils.control_function import NegotiationState
 
 # single model architecture system prompt
-def get_unified_prompt(seed: dict, buyer_personality, seller_personality, conversation: dict, state: NegotiationState, action_prompt: str): 
+def get_unified_prompt(negotiation_packet: dict, state: NegotiationState, action_prompt: str): 
     """
     Args: 
     seed: negotiation seed (unpacked from JSON format into python dict before passing into function)
@@ -15,9 +15,11 @@ def get_unified_prompt(seed: dict, buyer_personality, seller_personality, conver
     seller_personality: seller personality class
     conversation: conversation history dict (follows schema/conversation_json_template.py). passed into function after getting updated for each turn
     """
-
+    buyer_personality = negotiation_packet["buyer_personality"]
+    seller_personality = negotiation_packet["seller_personality"]
+    
     # build conversation history
-    dialog = conversation["dialog"]
+    dialog = negotiation_packet["dialog"]
     conversation_history = [f"{side}: {msg}" for side, msg in dialog]
     history_string = "\n".join(conversation_history)
 

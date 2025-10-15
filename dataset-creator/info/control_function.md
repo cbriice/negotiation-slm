@@ -6,6 +6,8 @@ In this file:
 
 - Control features - details to track within control function
 
+Parameters such as seller min acceptable, buyer max acceptable, seller list are derived from the simulation state seed.
+
 ## Subfunction inputs
 
 Important notation: period in variable name - equivalent to a math subscript. to indicate indexed variables in a math equation. i.e. P.k:= price at turn k.

@@ -10,7 +10,7 @@ The overall purpose is to create a comprehensive negotiation dataset to train a 
 The language model used to generate negotiation dialogs will be the `Llama-3.3 70B` model. It will be loaded using ollama and ran locally using a hybrid architecture: loaded in 4-bit, most weights in system RAM, a chunk offloaded to GPU to optimize memory usage while letting the GPU handle the hot layers. 
 
 ### Response generation
-Responses will be generated zero-shot style using `ollama.generate()`. Conversation history will be accumulated in a prompt and injected underneath the system prompt from `prompts.prompts_system.get_single_system_prompt`, and then the action-specific prompt which the backend decides is appropriate for the next turn will be placed as the next action for the model to generate a response according to. The model's output string should be caught and added to a state conversation JSON, which follows the template in schema/conversation_json_template.jsonl. 
+Responses will be generated zero-shot style using `ollama.generate()`. Conversation history will be accumulated in a prompt and injected underneath the system prompt from `prompts.prompts_system.get_unified_prompt`, and then the action-specific prompt which the backend decides is appropriate for the next turn will be placed as the next action for the model to generate a response according to. The model's output string should be caught and added to a state conversation JSON, which follows the template in schema/negotiation_json_template.jsonl. 
 
 ## Simulation architecture
 See info/sim_documentation.md. 
@@ -26,8 +26,8 @@ See info/sim_documentation.md.
 
 ## Integration with existing training lab module
 This module will be designed to create datasets to be used in the existing in ~/code/Intentia/training-lab (./): 
-- SelfChatWorld (./worlds/selfchat_world.py, ./scripts/run_selfchat.py)
 - SFT trainer (./training/sft_trainer.py)
+    - This module will be used to run training based on the dataset created here
 
 training-lab is at the same level of the project as dataset-creator. Files from the Intentia project can be imported as packages, so in this project (dataset-creator) we should import existing modules like selfchat_world (avoiding redundant code) to facilitate negotiation that will be recorded for training data. the data generated here should be packaged nicely so that it can be imported cleanly into sft_trainer
 - to activate the venv that holds project files: `source ~/code/Intentia/.venv_proj/bin/activate`
