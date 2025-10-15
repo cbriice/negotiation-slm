@@ -34,7 +34,7 @@ class NegotiationParams:
     hc2: float = 0.5  # Close action weight 2
     hl: float = 1  # Clarify action weight
     eps: float = 0.01  # Local threshold for action functions
-    s_c: float = 0.6  # Threshold for q_close validity (should be >= 0.6)
+    s_c: float = 0.8  # Threshold for q_close validity (should be >= 0.6)
 
 
 @dataclass
@@ -198,11 +198,8 @@ class ControlFunction:
         s = features['s']
         A_k = features['A_k']
 
-        # Compensate price action (using ETA parameter)
-        q_compensate = cz * (1 + self.params.ETA)
-
-        # Fine tune price action (using sqrt for geometric mean-like behavior)
-        q_finetune = self.params.hz * np.sqrt(cz * cg) if (cz * cg) > 0 else 0
+        # Price adjust weight
+        q_price_adjust = self.params.hz * (cg + cz)
 
         # Extra item action (weighted more earlier in negotiation with A_k^GAMMA)
         q_extra = cx * pow(A_k, self.params.GAMMA)
@@ -222,8 +219,7 @@ class ControlFunction:
         q_clarify = self.params.hl * (1 - s)
 
         return {
-            'compensate': q_compensate,
-            'finetune': q_finetune,
+            'price_adjust': q_price_adjust,
             'extra': q_extra,
             'close': q_close,
             'clarify': q_clarify

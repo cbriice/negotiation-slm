@@ -38,16 +38,20 @@ class PersonalityTraits:
     c: float = field(init=False)        # faratin convergence parameter
     u: float = field(init=False)        # conditional accept paramter (if u > 1, enable conditional accept)
     eta: float = field(init=False)      # ultimatum parameter (if eta > 0.5, enable ultimatums)
+    p: float = field(init=False)        # % chance of price concession on price adjust turn
 
     def __post_init__(self):
         self.zeta = self.patience
         self.c = sqrt(self.cooperativeness * self.flexibility)
         self.u = self.c + self.opportunism
         self.eta = sqrt(self.assertiveness * self.dominance * self.risk_tol)
+        self.p = float(np.mean([1 - self.confidence_self, self.cooperativeness, self.flexibility, 1 - self.persistence]))
 
 # -------------------------- Personalities -------------------------------
 class StraightToPoint():
     def __init__(self, traits: PersonalityTraits):
+        self.description = "A straight to the point negotiator. They just want to close the deal quickly and favorably."
+
         self.traits = traits
         traits.assertiveness = 0.7
         traits.dominance = 0.6
@@ -76,6 +80,8 @@ class StraightToPoint():
 
 class Desperate():
     def __init__(self, traits: PersonalityTraits):
+        self.description = "A desperate negotiator. They'll do almost anything to close the deal."
+
         self.traits = traits
         traits.assertiveness = 0.2
         traits.dominance = 0.1
@@ -98,12 +104,14 @@ class Desperate():
             traits.empathy, traits.rationality, traits.deceptiveness, traits.risk_tol, traits.persistence, traits.opportunism, traits.strategic, traits.composure
         ])
         
-        traits.beta = 0.4
+        traits.beta = 0.3
         traits.alpha = 1
         traits.temp = 0.8
 
 class Skeptic():
     def __init__(self, traits: PersonalityTraits):
+        self.description = "A skeptical negotiator. Not easily convinced to change their mind on the deal."
+
         self.traits = traits
         traits.assertiveness = 0.6
         traits.dominance = 0.6
@@ -132,6 +140,8 @@ class Skeptic():
 
 class Bluffer():
     def __init__(self, traits: PersonalityTraits):
+        self.description = "A bluffing negotiator. You will push strongly for a favorable deal even if it's not super reasonable."
+
         self.traits = traits
         traits.assertiveness = 1
         traits.dominance = 0.8
@@ -160,6 +170,8 @@ class Bluffer():
 
 class Confrontational():
     def __init__(self, traits: PersonalityTraits):
+        self.description = "A confrontational negotiator. They aggressively push for a good deal using whatever means necessary."
+
         self.traits = traits
         traits.assertiveness = 0.9
         traits.dominance = 1
@@ -188,6 +200,8 @@ class Confrontational():
 
 class Haggler():
     def __init__(self, traits: PersonalityTraits):
+        self.description = "A haggling negotiator. They don't fold easily and want to get as much from the counterparty as they can."
+        
         self.traits = traits
         traits.assertiveness = 0.8
         traits.dominance = 0.7
@@ -216,6 +230,8 @@ class Haggler():
 
 class WeakEmotional(): 
     def __init__(self, traits: PersonalityTraits):
+        self.description = "A weak and emotional negotiator. They just want to reach a deal, and don't like confrontation."
+
         self.traits = traits
         traits.assertiveness = 0.4
         traits.dominance = 0.3
@@ -244,6 +260,8 @@ class WeakEmotional():
 
 class Rationalizer():
     def __init__(self, traits: PersonalityTraits):
+        self.description = "A rational negotiator. Prefer to use reason and logic to win the negotiation and reach a good deal."
+
         self.traits = traits
         traits.assertiveness = 0.7
         traits.dominance = 0.7
@@ -272,6 +290,8 @@ class Rationalizer():
 
 class StoneWall():
     def __init__(self, traits: PersonalityTraits):
+        self.description = "A stonewall negotiator. They don't even want to hear it from the counterparty - their offer doesn't need much changing."
+
         self.traits = traits
         traits.assertiveness = 1
         traits.dominance = 0.7
@@ -300,6 +320,8 @@ class StoneWall():
 
 class Opportunist():
     def __init__(self, traits: PersonalityTraits):
+        self.description = "An opportunist negotiator. They will jump at a favorable deal as soon as it presents itself."
+
         self.traits = traits
         traits.assertiveness = 0.5
         traits.dominance = 0.4
@@ -328,6 +350,8 @@ class Opportunist():
 
 class HighHorse():
     def __init__(self, traits: PersonalityTraits):
+        self.description = "A high-and-mighty negotiator. They think the counterparty is being ridiculous for even thinking of trying to undermine them."
+
         self.traits = traits
         traits.assertiveness = 1
         traits.dominance = 0.9
@@ -356,6 +380,8 @@ class HighHorse():
 
 class Stubborn():
     def __init__(self, traits: PersonalityTraits):
+        self.description = "A stubborn negotiator. They hate to change the terms of the deal from how they started and need a lot of convincing."
+
         self.traits = traits
         traits.assertiveness = 1
         traits.dominance = 0.6
@@ -367,7 +393,7 @@ class Stubborn():
         traits.empathy = 0.3
         traits.rationality = 0.3
         traits.deceptiveness = 0.2
-        traits.risk_tol = 0.2
+        traits.risk_tol = 0.6
         traits.persistence = 0.9
         traits.opportunism = 0.5
         traits.strategic = 0.5

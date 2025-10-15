@@ -2,20 +2,15 @@
 The simulation state tracks state-level negotiation variables for each side. These values are used as an analytical source of truth for guiding language model (LM) negotiation via prompting.
 
 ### State variables
-  - `Ps`, `Pb`, `P_k`, `r`, `R` (defined in control_function.md)
-
-### State computations
-The negotiation state for each side will have different values and be updated differently based on personality 
-
-A way to structure this in code could be that u define each personality as its own class that inherits a base negotiator class and assigns parameter/prompt variables based on personality data.
+  - `Ps`, `Pb`, `P_k`, `r`, `R`, `n_b_k`, `n_s_k`, `l_k` (defined in control_function.md)
 
 # Simulation architecture - negotiation flow
 Negotiation will have some fixed structure around the control function and the control function will be deployed at certain points as necessary to give a good distribution when it comes to negotiation flow. 
 
 ### Negotiation Initiation
-  1. Negotiation will start with the buyer being prompted to reach out to the seller with a greeting and an indication that they are interested (asking if the item is still available, just normal greeting, etc)
-  2. The seller will be prompted to respond to the greeting
-  3. The buyer will be prompted to make an initial price offer (prompts for personality deck specifics will determine how this offer goes)
+  1. **Turn 0**: Negotiation will start with the buyer being prompted to reach out to the seller with a greeting and an indication that they are interested (asking if the item is still available, just normal greeting, etc)
+  2. **Turn 1**: The seller will be prompted to respond to the greeting
+  3. **Turn 2**: The buyer will be prompted to make an initial price offer, prompt selected from those in prompts/prompts_price_adjust.py
 
 **Initial price offer**
 Initial price offer will be calculated automatically as a percentage of the seller's minimum price determined by buyer's personality preset parameter `ALPHA`
@@ -24,24 +19,18 @@ From this point the control function will take over and begin calculating optima
 
 Potentially, close will be blocked as an action until 6 messages (3 each) have been sent
 
-### Price concession model
-When either buyer or seller makes a price concession after the initial offer, price will be changed based on a Faratin model in either direction.
-Where `P_s.k` = seller offer at turn k, `P_b.k` = buyer target at turn `k`, `c` is convergence speed parameter:
-
-  `P_s.k` = `P_b.k-1` + (`P_s.k-1` - `P_b.k-1`) * exp(-`c`*`k`)
-
-  `P_b.k` = `P_s.k-1` + (`P_b.k-1` - `P_s.k-1`) * exp(-`c`*`k`)
-
-This way the LMs are not picking numbers for price, they just make a decision and price is automatically adjusted by this formula. These adjustments model concession where the buyer is assumed to be increasing their price towards seller desired and vice versa.
-This would be used after the initial offer which determines buyer price at k=0 and seller would start at their ideal price.
+## Negotiation architecture - macro
+In general, it is important that the negotiation dialogues are coherent and cohesive so that the model being trained is able to learn effective negotiation style as well as language and behavior. Therefore, when a question is asked or a proposal is made, it should be acknowledged by the partner and responded to accordingly. Below are some examples of this.
 
 ### Forced responses
 These are scenarios where a specific response will be mandated from the partner
 
   1. **LM offers to close the deal**
-    - Partner LM is forced to make a decision
-    - Extract `cz` value. If greater than zero, will mostly reject but some personalities may accept anyways
-    - If `cz` == 0, check `cg`: prompt to accept or reject based on favorability of `cg` value
+    Partner LM is forced to make a decision.
+    - Extract `cz` value. If greater than zero, force reject unless `eta` personality param is < 0.2 - if `eta` < 0.2, 50% chance to accept.
+    - If `cz` == 0, check `cg`: 
+        if `cg` < 0.5 and `eta` < 0.8, force accept; if `eta` > 0.8, 85% chance to accept. 
+        if `cg` > 0.5 and `eta` < 0.8, 70% chance to accept; if `eta` > 0.8, 30% chance to accept. 
     - If `cz` and `cg` are both zero, force an accept prompt. 
 
     - If partner LM rejects the deal:
@@ -52,10 +41,10 @@ These are scenarios where a specific response will be mandated from the partner
     - Partner LM is prompted to respond to the clarification
 
   3. **LM proposes price change**
-    - if "clarify" is selected for partner, must acknowledge price change in clarification ask. like "before i accept, what about..." or sm
-    - if "close" is selected partner, must use the recently proposed price in its offer
+  Current price is updated, 
+    - if "close" is selected for partner, must use the recently proposed price in its offer
 
-  It would make most sense to track these based on softmax results from previous turn. If softmax chooses finetune or compensate it can be assumed that price change was offered, clarify and close are obvious. 
+  It would make most sense to track these based on softmax results from previous turn. If softmax chooses price adjust it can be assumed that price change was offered, clarify and close are obvious. 
   Ctrl function parameters would still be updated in the background as negotiation progresses even though ctrl function isn't being used so that they're accurate for when function called
 
 ### Phases of negotiation
@@ -64,13 +53,24 @@ Integration of control function - order of phases can be determined by ctrl func
 Presets:
   - If price chosen (by ctrl func) to negotiate, models negotiate price until `cz` == 0 and `cg` under threshold
   - If extras chosen, same type of thing
-  - During price negotiation, if progress not rly being made towards ideal, personality becomes more accentuated in prompts (more aggressive, adding extra items, tactics, etc)
-    - Cutoff at some set amount of turns to pivot negotiation focus elsewhere. 6 each? Some personalities could have prompts chosen to ddd
+    - Cutoff at some set amount of turns to pivot negotiation focus elsewhere. 6 each?
   
-  - Clarification phase - force a clarify prompt periodically so shit doesn't just proceed super fast to close based only on price and measurables.
+  - Clarification phase - force a clarify prompt randomly within first 3 free turns and then periodically based on negotiation progression. If the same action is chosen 3 times in a row, the 4th time should detect this and force clarify instead. Otherwise let it be selected naturally in softmax calculation. 
 
-### Prompt contextualization
-Each prompt given to the models corresponds to an action chosen by the control function, and each action has a goal. In order to contextualize prompt selection, track deltas for each control feature (`cz`, `cg`, etc) and use these to define success of an action. If an action is successful (delta is positive above some threshold), add a factor that reduces the probability of it being selected for the next action by lowering its scalar value before it gets put into softmax. 
+## Negotiation context management
+**For 1 model generation**: this shouldn't be a problem because as the model generates the conversation, it will have the convo history in its context. 
 
-**Prompt duplication prevention**
-Once a prompt has been used for one side in a particular negotiation dialog, it should be removed from the pool of available prompts for the next turn corresponding to that action to avoid repetition. 
+# Price changing
+
+### Price concession model
+When either buyer or seller makes a price concession after the initial offer, price will be changed based on a Faratin model in either direction.
+Where `P_s.k` = seller offer at turn k, `P_b.k` = buyer target at turn `k`, `c` is convergence speed parameter:
+
+  `P_s.k` = `P_b.k-1` + (`P_s.k-1` - `P_b.k-1`) * exp(-`c`*`k`)
+
+  `P_b.k` = `P_s.k-1` + (`P_b.k-1` - `P_s.k-1`) * exp(-`c`*`k`)
+
+Whether or not price is conceded is determined by the `p` parameter of the personality. `p` is defined as the % chance of price concession. Pick randomly based on this % whether or not price is conceded - then the price (conceded or not) is injected into the price adjust prompt.
+
+This way the LMs are not picking numbers for price, they just make a decision and price is automatically adjusted by this formula. These adjustments model concession where the buyer is assumed to be increasing their price towards seller desired and vice versa.
+This would be used after the initial offer which determines buyer price at k=0 and seller would start at their ideal price.

@@ -103,8 +103,7 @@ Buyer/seller ambiguous definitions. use buyer/seller specific variables in pract
 - `RHO`: parameter to allow independent tuning of `q_compensate`; 0<=`RHO`<=0.5
 - `s_c`: threshold parameter for validity of `q_close` trigger. Should be >= 0.6
 
-**Compensate price**: `q_compensate` = `cz` * (1 + `RHO`)
-**Fine tune price**: `q_finetune` = `hz` * `cg`
+**Price adjust**: `hz` * (`cg` + `cz`)
 
 **Extra item**: `q_extra` = `cx` * `A_k`^`GAMMA`
 
