@@ -9,9 +9,9 @@ from dataclasses import dataclass
 import numpy as np
 
 @dataclass
-class BuyerDealAccept:
+class BuyerAcceptPrompts:
     # favorable accept
-    fa_prompts = [
+    prompts = [
         {"prompt": "You're pleased how smooth the deal went, accept their offer amicably.",
          "embedding": np.array([0.7, 0.6, 0.7, 0.8, 0.9, 0.8, 0.8, 0.7, 0.7, 0.1, 0.3, 0.2, 0.7, 0.3, 0.9])},
         {"prompt": "This is great, accept quickly before the seller changes their mind.",
@@ -37,9 +37,9 @@ class BuyerDealAccept:
     ]
 
 @dataclass
-class SellerDealAccept:
+class SellerAcceptPrompts:
     # favorable accept
-    fa_prompts = [
+    prompts = [
         {"prompt": "You're pleased how smooth negotiation went, accept their offer amicably.",
          "embedding": np.array([0.8, 0.6, 0.7, 0.8, 0.9, 0.8, 0.8, 0.7, 0.7, 0.1, 0.3, 0.3, 0.6, 0.5, 0.9])},
         {"prompt": "The buyer is making a great offer for you - accept before they change their mind.",
@@ -51,7 +51,7 @@ class SellerDealAccept:
     ]
 
     # unfavorable accept
-    ufa_prompts = [
+    prompts = [
         {"prompt": "You need the money soon and are sick of negotiating, so this deal is good enough to accept.",
          "embedding": np.array([0.8, 0.2, 0.4, 0.3, 0.7, 0.8, 0.1, 0.4, 0.6, 0.2, 0.2, 0.2, 0.8, 0.5, 0.5])},
         {"prompt": "Accept their offer begrudgingly - this isn't ideal, but it's the best you'll get.",

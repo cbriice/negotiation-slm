@@ -14,7 +14,7 @@ import numpy as np
 class BuyerUltimatumPrompts:
     # also requires price injection like prompts_price_adjust
 
-    ult_prompts = [
+    prompts = [
         {"prompt": "You're walking away unless they take your offer of {price}.",
          "embedding": np.array([0.9, 0.8, 0.9, 0.6, 0.1, 0.1, 0.3, 0.1, 0.6, 0.3, 0.9, 0.6, 0.5, 0.7, 0.8])},
         {"prompt": "The only way you'd possibly consider the deal is at {price}, otherwise you're done.",
@@ -32,7 +32,7 @@ class BuyerUltimatumPrompts:
 
 @dataclass
 class SellerUltimatumPrompts:
-    ult_prompts = [
+    prompts = [
         {"prompt": "You'll no longer consider a deal unless they offer {price}.",
          "embedding": np.array([0.8, 0.7, 0.9, 0.6, 0.1, 0.1, 0.4, 0.1, 0.7, 0.2, 0.8, 0.5, 0.4, 0.7, 0.9])},
         {"prompt": "You're done listening to them try to scam you - your final offer is {price}.",

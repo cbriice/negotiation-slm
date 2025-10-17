@@ -9,10 +9,10 @@ from dataclasses import dataclass
 import numpy as np
 
 @dataclass
-class BuyerClose:
+class BuyerClosePrompts:
     # prompts from this class require price variable injections same as prompts in prompts/prompts_price_adjust.py
 
-    bc_prompts = [
+    prompts = [
         {"prompt": "You'll take the deal if they accept your price of {price}.",
          "embedding": np.array([0.8, 0.6, 0.7, 0.7, 0.6, 0.5, 0.7, 0.4, 0.7, 0.3, 0.5, 0.6, 0.6, 0.7, 0.7])},
         {"prompt": "The only way you'll possibly take the deal is if they accept your price of {price}.",
@@ -32,10 +32,10 @@ class BuyerClose:
     ]
 
 @dataclass
-class SellerClose:
+class SellerClosePrompts:
     # also require price injections
 
-    sc_prompts = [
+    prompts = [
         {"prompt": "You'll give it to them right now for {price}.",
          "embedding": np.array([0.8, 0.6, 0.7, 0.8, 0.6, 0.6, 0.4, 0.4, 0.6, 0.3, 0.6, 0.5, 0.8, 0.2, 0.9])},
         {"prompt": "The only way you'd possibly sell to them is if they agree to your price of {price}.",

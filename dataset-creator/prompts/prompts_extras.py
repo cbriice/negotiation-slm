@@ -10,7 +10,7 @@ import numpy as np
 
 @dataclass
 class BuyerExtrasPrompts:
-    xtra_prompts = [
+    prompts = [
         {"prompt": "Convince the seller that you need items added onto the deal in order to make the price worth it.",
          "embedding": np.array([0.8, 0.6, 0.7, 0.6, 0.4, 0.4, 0.7, 0.4, 0.8, 0.5, 0.5, 0.7, 0.7, 0.8, 0.7])},
         {"prompt": "Ask the seller to remove extra items in favor of reducing the total cost.",
@@ -31,7 +31,7 @@ class BuyerExtrasPrompts:
 
 @dataclass
 class SellerExtrasPrompts:
-    xtra_prompts = [
+    prompts = [
         {"prompt": "Reiterate the warranty/quality assurance plan and use it to justify your price.",
          "embedding": np.array([0.7, 0.6, 0.8, 0.8, 0.5, 0.4, 0.7, 0.3, 0.9, 0.3, 0.5, 0.7, 0.6, 0.8, 0.8])},
         {"prompt": "Add a warranty/quality assurance plan for some time frame after purchase and use it to justify an increase in price.",

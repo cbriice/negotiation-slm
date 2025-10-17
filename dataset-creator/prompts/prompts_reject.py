@@ -10,7 +10,7 @@ import numpy as np
 
 @dataclass
 class BuyerRejectPrompts:
-    rej_prompts = [
+    prompts = [
         {"prompt": "You're no longer interested in negotiating this deal, but there's no hard feelings.",
          "embedding": np.array([0.5, 0.4, 0.7, 0.5, 0.6, 0.5, 0.7, 0.6, 0.7, 0.2, 0.4, 0.3, 0.4, 0.5, 0.9])},
         {"prompt": "The seller is stupid for not taking your offer, and you're no longer interested in negotiation.",
@@ -25,7 +25,7 @@ class BuyerRejectPrompts:
 
 @dataclass
 class SellerRejectPrompts:
-    rej_prompts = [
+    prompts = [
         {"prompt": "Politely say you're no longer interested in negotiating the deal.",
          "embedding": np.array([0.6, 0.4, 0.6, 0.5, 0.7, 0.5, 0.7, 0.7, 0.7, 0.1, 0.3, 0.3, 0.4, 0.5, 1])},
         {"prompt": "You think they're being ridiculous, tell them you're done wasting your time with them.",
