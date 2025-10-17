@@ -22,7 +22,8 @@ See info/sim_documentation.md.
 - Every negotiation is governed by the control function and features
 
 ## Negotiation seeds
-- Yet to be developed: I will provide a database of negotiation seeds.
+- Seed files stored in seeds/
+- Loaded into negotiation packet using utils/seed_loader.py
 
 ## Integration with existing training lab module
 This module will be designed to create datasets to be used in the existing in ~/code/Intentia/training-lab (./): 

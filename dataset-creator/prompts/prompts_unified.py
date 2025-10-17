@@ -30,18 +30,33 @@ def get_unified_prompt(negotiation_packet: dict, state: NegotiationState, action
     else:
         turn = "SELLER"
 
+    seed = negotiation_packet["seed"]   # type NegotiationSeed from schema/seed_initializer.py
+
+    # get seed context
+    seed_context = seed["context"]
+    context_info = [f"{k}: {val}" for k, val in seed_context]
+    # add notes
+    context_info.append(seed["notes"])
+    context = "\n".join(context_info)
+
     return f"""
         [ROLE] 
         You are a negotiation simulation model that generates synthetic dialogues for dataset creation. You will generate a dialog between Buyer and Seller based on descriptions of their personalities and prompts for each turn.
         
         [CONTEXT]
-        TODO: seed information goes here, formatting not decided yet. item, info, context abt item
+        **IMPORTANT**: 
+        Buyer and Seller are negotiating for {seed.quantity} {seed.condition} {seed.item}.
+        The item is listed for ${seed.seller_list}. 
+        Negotiation is taking place in a(n) {seed.locality} area.
+        Context for this negotiation: 
+        {context}
 
         Buyer: {buyer_personality.description}
-        TODO: buyer info from seed here. price band, etc
+        Buyer doesn't want to pay more than ${seed.buyer_max}.
 
         Seller: {seller_personality.description}
-        TODO: seller info from seed here.
+        Seller doesn't want to sell for less than ${seed.seller_min}.
+        The seller can potentially offer these extras: {seed.extras_available}.
 
         CONVERSATION HISTORY:
         {history_string}
@@ -64,13 +79,17 @@ from dataclasses import dataclass
 
 @dataclass
 class GeneralPrompts:
-    buyer_clarify_respond: str = "Respond to the seller's query according to how the buyer's personality would respond."
-    seller_clarify_respond: str = "Respond to the buyer's query according to how the seller's personality would respond."
+    buyer_clarify_respond: str = "Respond to the seller's query according to how your personality would respond."
+    seller_clarify_respond: str = "Respond to the buyer's query according to how your personality would respond."
 
     # when favorable conditions/personality factor decides to accept deal, use these prompts
-    buyer_close_accept: str = "The seller has offered to close the deal at the current price. Generate a response to accept the deal according to how the buyer's personality would respond."
-    seller_close_accept: str = "The buyer has offered to close the deal at the current price. Generate a response to accept the deal according to how the seller's personality would respond."
+    buyer_close_accept: str = "The seller has offered to close the deal at the current price. Generate a response to accept the deal according to how your personality would respond."
+    seller_close_accept: str = "The buyer has offered to close the deal at the current price. Generate a response to accept the deal according to how your personality would respond."
 
     # when rejecting an accept offer
-    buyer_close_reject: str = "The seller has offered to close the deal at the current price. Generate a response to reject the deal according to how the buyer's personality would respond."
-    seller_close_reject: str = "The buyer has offered to close the deal at the current price. Generate a response to reject the deal according to how the seller's personality would respond."
+    buyer_close_reject: str = "The seller has offered to close the deal at the current price. Generate a response to reject the deal according to how your personality would respond."
+    seller_close_reject: str = "The buyer has offered to close the deal at the current price. Generate a response to reject the deal according to how your personality would respond."
+
+    # opening dialog
+    buyer_opener: str = "Greet the seller according to how your personality would."
+    seller_opener: str = "Respond to the buyer's greeting according to how your personality would."

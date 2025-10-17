@@ -1,8 +1,7 @@
 """
 Control Function Implementation for Negotiation Dataset Creator.
 
-This module implements the mathematical control function that governs
-negotiation flow, as defined in info/control_function.md.
+This module implements the mathematical control function that governs negotiation flow, as defined in info/control_function.md.
 """
 
 import numpy as np
@@ -14,8 +13,8 @@ import warnings
 @dataclass
 class NegotiationParams:
     """Global parameters for negotiation control."""
-    beta_b: float  # Buyer personality parameter
-    beta_s: float  # Seller personality parameter
+    beta_b: float  # Buyer personality parameter. derived from personality card
+    beta_s: float  # Seller personality parameter. derived from personality card                    
     ALPHA: float = 5.0  # Global exponential scaling parameter
     EPSILON: float = 1e-6  # Global threshold parameter
     DELTA: float = 1.0  # >=1 parameter weighing extras by progress
@@ -25,10 +24,9 @@ class NegotiationParams:
     # Control function weights
     w_g: float = 1  # Price gap weight
     w_z: float = 1  # Price range weight
-    w_x: float = 0.2  # Extra items weight
+    w_x: float = 1  # Extra items weight
 
     # Action function parameters
-    ETA: float = 0.3  # Parameter for q_compensate tuning (0 <= ETA <= 0.5)
     hz: float = 1  # Fine-tune action weight
     hc: float = 0.5  # Close action multiplier
     hc2: float = 0.5  # Close action weight 2
@@ -241,7 +239,7 @@ class ControlFunction:
         return dict(zip(actions, probabilities))
 
     def evaluate(self, state: NegotiationState, is_buyer: bool = True,
-                temperature: float = None) -> Dict[str, any]:
+                temperature: Optional[float] = None) -> Dict[str, any]:
         """
         Full evaluation of control function for a given state.
 

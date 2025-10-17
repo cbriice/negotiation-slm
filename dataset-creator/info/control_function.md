@@ -70,11 +70,11 @@ Whole function updates every turn k. Each argument besides weights updates for n
 Buyer and seller both have their own control functions 
 Mathematically defined
 
-`V_s(g_s, z_s, weights)` = weights.wz * z_s + weights.wg * g_s
+`V_s(g_s, z_s, weights)` = weights.wz * z_s + weights.wg * g_s + weights.wx * x
 
-`V_b(g_b, z_b, weights)` = weights.wz * z_b + weights.wg * g_b
+`V_b(g_b, z_b, weights)` = weights.wz * z_b + weights.wg * g_b + weights.wx * x
 
-`V_max` = weights.wz + weights.wg
+`V_max` = weights.wz + weights.wg + weights.wx
 
 ---
 # Action Determining Functions

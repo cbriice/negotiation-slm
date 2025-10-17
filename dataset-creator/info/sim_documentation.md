@@ -1,5 +1,10 @@
 # Simulation state
 The simulation state tracks state-level negotiation variables for each side. These values are used as an analytical source of truth for guiding language model (LM) negotiation via prompting.
+All information about each negotiation dialog will be contained in a negotiation packet, outlined in schema/negotiation_packet_template.py. Includes:
+  - seed
+  - buyer/seller personalities
+  - dialog as it's generated
+  - 3 bools to track success of negotiation for bookkeeping
 
 ### State variables
   - `Ps`, `Pb`, `P_k`, `r`, `R`, `n_b_k`, `n_s_k`, `l_k` (defined in control_function.md)
@@ -8,9 +13,9 @@ The simulation state tracks state-level negotiation variables for each side. The
 Negotiation will have some fixed structure around the control function and the control function will be deployed at certain points as necessary to give a good distribution when it comes to negotiation flow. 
 
 ### Negotiation Initiation
-  1. **Turn 0**: Negotiation will start with the buyer being prompted to reach out to the seller with a greeting and an indication that they are interested (asking if the item is still available, just normal greeting, etc)
-  2. **Turn 1**: The seller will be prompted to respond to the greeting
-  3. **Turn 2**: The buyer will be prompted to make an initial price offer, prompt selected from those in prompts/prompts_price_adjust.py
+  1. **Turn 0**: Negotiation will start with the buyer being prompted to reach out to the seller with a greeting and an indication that they are interested (asking if the item is still available, just normal greeting, etc). Prompt from prompts_unified.GeneralPrompts
+  2. **Turn 1**: The seller will be prompted to respond to the greeting. Prompt from prompts_unified.GeneralPrompts
+  3. **Turn 2**: The buyer will be prompted to make an initial price offer, prompt selected from those in prompts/prompts_price_adjust.py using vector similarity comparison
 
 **Initial price offer**
 Initial price offer will be calculated automatically as a percentage of the seller's minimum price determined by buyer's personality preset parameter `ALPHA`
@@ -70,7 +75,7 @@ Where `P_s.k` = seller offer at turn k, `P_b.k` = buyer target at turn `k`, `c` 
 
   `P_b.k` = `P_s.k-1` + (`P_b.k-1` - `P_s.k-1`) * exp(-`c`*`k`)
 
-Whether or not price is conceded is determined by the `p` parameter of the personality. `p` is defined as the % chance of price concession. Pick randomly based on this % whether or not price is conceded - then the price (conceded or not) is injected into the price adjust prompt.
+Whether or not price is conceded is determined by the `p` parameter of the personality. `p` is defined as the % chance of price concession. Pick randomly based on this % whether or not price is conceded - then the price (conceded or not) is injected into the price adjust prompt. This integrates into the control function by being ran every time price adjust is picked as an action - based on `p` the price is either adjusted or remains the same.
 
 This way the LMs are not picking numbers for price, they just make a decision and price is automatically adjusted by this formula. These adjustments model concession where the buyer is assumed to be increasing their price towards seller desired and vice versa.
 This would be used after the initial offer which determines buyer price at k=0 and seller would start at their ideal price.
