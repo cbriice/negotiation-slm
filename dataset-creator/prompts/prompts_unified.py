@@ -82,14 +82,6 @@ class GeneralPrompts:
     buyer_clarify_respond: str = "Respond to the seller's query according to how your personality would respond."
     seller_clarify_respond: str = "Respond to the buyer's query according to how your personality would respond."
 
-    # when favorable conditions/personality factor decides to accept deal, use these prompts
-    buyer_close_accept: str = "The seller has offered to close the deal at the current price. Generate a response to accept the deal according to how your personality would respond."
-    seller_close_accept: str = "The buyer has offered to close the deal at the current price. Generate a response to accept the deal according to how your personality would respond."
-
-    # when rejecting an accept offer
-    buyer_close_reject: str = "The seller has offered to close the deal at the current price. Generate a response to reject the deal according to how your personality would respond."
-    seller_close_reject: str = "The buyer has offered to close the deal at the current price. Generate a response to reject the deal according to how your personality would respond."
-
     # opening dialog
     buyer_opener: str = "Greet the seller according to how your personality would."
     seller_opener: str = "Respond to the buyer's greeting according to how your personality would."

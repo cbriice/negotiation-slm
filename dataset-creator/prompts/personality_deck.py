@@ -36,14 +36,12 @@ class PersonalityTraits:
     # trait-dependent params
     zeta: float = field(init=False)     # max turns multiplier
     c: float = field(init=False)        # faratin convergence parameter
-    u: float = field(init=False)        # conditional accept paramter (if u > 1, enable conditional accept)
     eta: float = field(init=False)      # ultimatum parameter (if eta > 0.5, enable ultimatums)
     p: float = field(init=False)        # % chance of price concession on price adjust turn
 
     def __post_init__(self):
         self.zeta = self.patience
         self.c = sqrt(self.cooperativeness * self.flexibility)
-        self.u = self.c + self.opportunism
         self.eta = sqrt(self.assertiveness * self.dominance * self.risk_tol)
         self.p = float(np.mean([1 - self.confidence_self, self.cooperativeness, self.flexibility, 1 - self.persistence]))
 
