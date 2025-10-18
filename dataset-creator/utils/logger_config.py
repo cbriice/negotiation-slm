@@ -6,10 +6,9 @@ monitoring, and analysis of negotiation simulations.
 """
 
 import logging
-import logging.handlers
 from pathlib import Path
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 import sys
 from typing import Optional, Dict, Any
 
@@ -60,7 +59,8 @@ class SimulationLogger:
         )
 
         # Console handler for important messages
-        self._setup_console_handler()
+        # Disabled console output
+        # self._setup_console_handler()
 
     def _setup_logger(self, name: str, filename: str, level: int) -> logging.Logger:
         """
@@ -154,7 +154,7 @@ class SimulationLogger:
             "seed_id": seed_id,
             "buyer_personality": buyer_personality,
             "seller_personality": seller_personality,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat()
         })
 
     def log_simulation_end(self, sim_id: str, outcome: Dict[str, Any],
@@ -172,11 +172,11 @@ class SimulationLogger:
             "sim_id": sim_id,
             "outcome": outcome,
             "duration_seconds": duration,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat()
         })
 
     def log_turn(self, sim_id: str, turn: int, speaker: str, action: str,
-                message: str = None):
+                message: Optional[str] = None):
         """Log individual turn details."""
         self.sim_logger.debug(
             f"[{sim_id}] Turn {turn} - {speaker} - Action: {action}"
@@ -224,7 +224,7 @@ class SimulationLogger:
             "error_type": type(error).__name__,
             "error_message": str(error),
             "context": context,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat()
         })
 
     def log_warning(self, sim_id: str, message: str, context: str = ""):

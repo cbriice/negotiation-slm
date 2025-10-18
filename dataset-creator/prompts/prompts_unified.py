@@ -35,10 +35,10 @@ def get_unified_prompt(negotiation_packet: dict, state: NegotiationState, action
     seed = negotiation_packet["seed"]   # type NegotiationSeed from schema/seed_initializer.py
 
     # get seed context
-    seed_context = seed["context"]
+    seed_context = seed.context
     context_info = [f"{k}: {val}" for k, val in seed_context.items()]
     # add notes
-    context_info.append(seed["notes"])
+    context_info.append(seed.notes)
     context = "\n".join(context_info)
 
     return f"""
