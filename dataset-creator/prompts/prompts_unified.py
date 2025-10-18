@@ -23,7 +23,7 @@ def get_unified_prompt(negotiation_packet: dict, state: NegotiationState, action
     conversation_history = "\n".join(
         [f"{side.upper()}: {msg.strip()}" for side, msg in dialog]
     )
-    history_string = "\n".join(conversation_history)
+    history_string = conversation_history
 
     # since buyer always has first turn (turn index 0) you can deduce whose turn it is from turn counter in state
     turn_idx = state.r

@@ -281,9 +281,7 @@ class LLMInterface:
                         **inputs,
                         "max_new_tokens": self.config.max_tokens,
                         "pad_token_id": tokenizer.pad_token_id or tokenizer.eos_token_id,
-                        "eos_token_id": tokenizer.eos_token_id,
-                        "stop_strings": ["\n\n", "BUYER:", "SELLER:"],
-                        "tokenizer": tokenizer  # Pass tokenizer for stop_strings
+                        "eos_token_id": tokenizer.eos_token_id
                     }
 
                     # Only add sampling parameters when actually sampling
@@ -304,6 +302,10 @@ class LLMInterface:
 
                 # Clean the response
                 generated_text = self._clean_response(generated_text)
+
+                # Check for degenerate response (excessive newlines, vertical text, etc.)
+                if self._is_degenerate_response(generated_text):
+                    raise ModelInferenceError("Generated response is degenerate (excessive newlines or repetitive pattern)")
 
                 # Validate response
                 if not generated_text or len(generated_text.strip()) < 10:
@@ -345,6 +347,39 @@ class LLMInterface:
             f"Failed after {self.config.max_retries} attempts: {last_error}"
         )
 
+
+    def _is_degenerate_response(self, text: str) -> bool:
+        """
+        Check if response is degenerate (e.g., excessive newlines, repetitive characters).
+
+        Args:
+            text: Text to check
+
+        Returns:
+            True if text is degenerate, False otherwise
+        """
+        if not text:
+            return True
+
+        # Check for excessive newline density (>30% of characters are newlines)
+        newline_ratio = text.count('\n') / max(len(text), 1)
+        if newline_ratio > 0.3:
+            return True
+
+        # Check for vertical text pattern (single characters separated by newlines)
+        lines = text.split('\n')
+        if len(lines) > 5:
+            single_char_lines = sum(1 for line in lines if len(line.strip()) <= 1)
+            if single_char_lines / len(lines) > 0.5:
+                return True
+
+        # Check for extreme repetition
+        if len(text) > 20:
+            unique_chars = len(set(text.replace('\n', '').replace(' ', '')))
+            if unique_chars < 5:  # Very few unique characters
+                return True
+
+        return False
 
     def _clean_response(self, text: str) -> str:
         """
