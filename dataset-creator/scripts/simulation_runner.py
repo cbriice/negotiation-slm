@@ -296,7 +296,9 @@ class SimulationRunner:
 
         # Track forced response flags
         forced_response = None
-        action_blocked = False
+
+        # Track rejection attempts for persistence mechanic
+        has_had_rejection = False
 
         # Track control features for state updates
         control_features = {'cg': 0, 'cz': 0, 's': 0, 'A_k': 0}
@@ -372,7 +374,6 @@ class SimulationRunner:
                     )
                     self.logger.sim_logger.info(f"[{sim_id}] Turn {turn}: Forced response - REJECT")
                     forced_response = None
-                    action_blocked = True  # Block actions after rejection
 
                 elif forced_response == "clarify_respond":
                     action = "clarify_respond"
@@ -381,14 +382,6 @@ class SimulationRunner:
                     )
                     self.logger.sim_logger.info(f"[{sim_id}] Turn {turn}: Forced response - CLARIFY_RESPOND")
                     forced_response = None
-
-                elif action_blocked:
-                    # After rejection, negotiation ends
-                    self.logger.sim_logger.info(f"[{sim_id}] Negotiation ended after rejection")
-                    print("Negotiation ended after rejection.")
-                    packet["outcome"] = "no_deal"
-                    packet["deal_closed"] = False
-                    break
 
                 else:
                     # Normal control function action selection
@@ -424,6 +417,47 @@ class SimulationRunner:
             speaker = "BUYER" if is_buyer_turn else "SELLER"
             packet["dialog"].append((speaker, response))
             self.logger.log_turn(sim_id, turn, speaker, action, response)
+
+            # Check if negotiation should end after rejection
+            if action == "reject":
+                # Determine if the other party will persist after rejection
+                # The rejecting party is the current speaker
+                rejecting_party = "BUYER" if is_buyer_turn else "SELLER"
+                other_party_personality = seller_personality if is_buyer_turn else buyer_personality
+
+                if not has_had_rejection:
+                    # First rejection - check if other party persists
+                    persistence_roll = random.random()
+                    persistence_threshold = other_party_personality.traits.persistence
+
+                    if persistence_roll < persistence_threshold:
+                        # Other party persists - negotiation continues
+                        self.logger.sim_logger.info(
+                            f"[{sim_id}] {rejecting_party} REJECTED at ${state.P_k}, but other party persists "
+                            f"(roll: {persistence_roll:.3f} < persistence: {persistence_threshold:.3f})"
+                        )
+                        print(f"{rejecting_party} rejected at ${state.P_k}, but negotiation continues (persistence check passed)")
+                        has_had_rejection = True
+                        # Clear any forced response to allow negotiation to continue naturally
+                        forced_response = None
+                        # Continue negotiation - don't break
+                    else:
+                        # Other party doesn't persist - negotiation ends
+                        self.logger.sim_logger.info(
+                            f"[{sim_id}] DEAL REJECTED at price: ${state.P_k} "
+                            f"(persistence check failed: {persistence_roll:.3f} >= {persistence_threshold:.3f})"
+                        )
+                        print(f"Deal rejected at price: ${state.P_k} (other party walks away)")
+                        packet["outcome"] = "no_deal"
+                        packet["deal_closed"] = False
+                        break
+                else:
+                    # Second rejection - definitively ends negotiation
+                    self.logger.sim_logger.info(f"[{sim_id}] SECOND REJECTION - negotiation definitively ended at price: ${state.P_k}")
+                    print(f"Second rejection - negotiation definitively ended at price: ${state.P_k}")
+                    packet["outcome"] = "no_deal"
+                    packet["deal_closed"] = False
+                    break
 
             # Update state based on action
             if action == "price_adjust" and turn > 2:
@@ -820,7 +854,6 @@ def combine_runs(run_directories: List[str], output_file: Optional[str] = None):
 def main():
     """Main entry point for simulation runner."""
     import argparse
-    import logging
 
     # Initialize logger first
     logger = setup_logger()
