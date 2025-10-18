@@ -13,6 +13,7 @@ from typing import Dict, List, Optional, Tuple
 import sys
 import os
 from datetime import datetime
+import time
 
 # Add parent directory to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -25,13 +26,14 @@ from utils.price_dynamics import PriceDynamics, PriceState
 from prompts.personality_deck import PersonalityDeck
 from prompts.prompts_unified import get_unified_prompt
 from schema.seed_initializer import NegotiationSeed
+from utils.logger_config import get_logger, setup_logger
 
 
 class SimulationRunner:
     """Main orchestrator for negotiation simulations."""
 
     def __init__(self, seed_directory: str = "seeds/",
-                 model_name: str = "llama3.3:70b",
+                 model_name: str = "Qwen/Qwen2.5-14B-Instruct",
                  max_turns: int = 20,
                  seed_category: Optional[str] = None,
                  seed_selection_method: str = "random"):
@@ -45,9 +47,22 @@ class SimulationRunner:
             seed_category: Optional category filter for seeds
             seed_selection_method: How to select seeds ("random", "sequential", "all")
         """
+        # Initialize logger
+        self.logger = get_logger()
+        self.logger.sim_logger.info("="*60)
+        self.logger.sim_logger.info("Initializing SimulationRunner")
+        self.logger.sim_logger.info(f"Configuration:")
+        self.logger.sim_logger.info(f"  - Model: {model_name}")
+        self.logger.sim_logger.info(f"  - Max turns: {max_turns}")
+        self.logger.sim_logger.info(f"  - Seed directory: {seed_directory}")
+        self.logger.sim_logger.info(f"  - Seed category: {seed_category}")
+        self.logger.sim_logger.info(f"  - Seed selection: {seed_selection_method}")
+
         # Initialize components
+        self.logger.sim_logger.info("Loading seeds...")
         self.seed_loader = MultiFileSeedLoader(seed_directory)
         self.seed_loader.load_all_seeds()
+        self.logger.sim_logger.info(f"Loaded {len(self.seed_loader.all_seeds)} total seeds")
 
         # Store configuration
         self.seed_category = seed_category
@@ -55,6 +70,7 @@ class SimulationRunner:
         self.seed_index = 0  # For sequential selection
 
         # Initialize control function with default params
+        self.logger.sim_logger.info("Initializing control function...")
         self.control_params = NegotiationParams(
             beta_b=0.1,  # Will be overridden by personality
             beta_s=0.1   # Will be overridden by personality
@@ -62,9 +78,11 @@ class SimulationRunner:
         self.control_function = ControlFunction(self.control_params)
 
         # Initialize LLM interface
+        self.logger.sim_logger.info(f"Initializing LLM interface with {model_name}...")
         llm_config = LLMConfig(model=model_name)
         self.llm_interface = LLMInterface(llm_config)
 
+        self.logger.sim_logger.info("Initializing personality deck and managers...")
         self.personality_deck = PersonalityDeck()
         self.prompt_manager = PromptManager()
         self.price_dynamics = PriceDynamics()
@@ -72,6 +90,9 @@ class SimulationRunner:
 
         # Track simulation results
         self.completed_negotiations = []
+
+        self.logger.sim_logger.info("SimulationRunner initialization complete!")
+        self.logger.sim_logger.info("="*60)
 
     def create_negotiation_packet(self, seed: NegotiationSeed,
                                  buyer_personality, seller_personality) -> Dict:
@@ -105,9 +126,14 @@ class SimulationRunner:
         Returns:
             NegotiationSeed or None if no seeds available
         """
+        self.logger.sim_logger.debug(f"Getting next seed with method: {self.seed_selection_method}")
+
         if self.seed_selection_method == "random":
             # Random selection, respecting category filter
-            return self.seed_loader.get_random_seed(self.seed_category)
+            seed = self.seed_loader.get_random_seed(self.seed_category)
+            if seed:
+                self.logger.sim_logger.debug(f"Selected random seed: {seed.seed_id} - {seed.item}")
+            return seed
 
         elif self.seed_selection_method == "sequential":
             # Sequential selection
@@ -115,12 +141,16 @@ class SimulationRunner:
                 # Get seeds for specific category
                 category_loader = self.seed_loader.get_loader_for_category(self.seed_category)
                 if category_loader:
-                    return category_loader.get_next_seed()
+                    seed = category_loader.get_next_seed()
+                    if seed:
+                        self.logger.sim_logger.debug(f"Selected sequential seed from category {self.seed_category}: {seed.seed_id}")
+                    return seed
             else:
                 # Get from all seeds sequentially
                 if self.seed_index < len(self.seed_loader.all_seeds):
                     seed = self.seed_loader.all_seeds[self.seed_index]
                     self.seed_index += 1
+                    self.logger.sim_logger.debug(f"Selected sequential seed {self.seed_index}/{len(self.seed_loader.all_seeds)}: {seed.seed_id}")
                     return seed
 
         elif self.seed_selection_method == "all":
@@ -128,8 +158,10 @@ class SimulationRunner:
             if self.seed_index < len(self.seed_loader.all_seeds):
                 seed = self.seed_loader.all_seeds[self.seed_index]
                 self.seed_index += 1
+                self.logger.sim_logger.debug(f"Selected seed {self.seed_index}/{len(self.seed_loader.all_seeds)}: {seed.seed_id}")
                 return seed
 
+        self.logger.sim_logger.warning("No more seeds available")
         return None
 
     def run_simulation(self, num_negotiations: int = 1,
@@ -144,7 +176,11 @@ class SimulationRunner:
         Returns:
             List of completed negotiation packets
         """
+        self.logger.sim_logger.info("="*60)
+        self.logger.sim_logger.info(f"Starting simulation run with {num_negotiations} negotiations")
+
         results = []
+        start_time = time.time()
 
         # Determine number of iterations based on selection method
         if self.seed_selection_method == "all":
@@ -155,29 +191,44 @@ class SimulationRunner:
             else:
                 total_seeds = len(self.seed_loader.all_seeds)
             num_negotiations = total_seeds
+            self.logger.sim_logger.info(f"Running negotiations for all {num_negotiations} seeds")
             print(f"Running negotiations for all {num_negotiations} seeds")
 
         for i in range(num_negotiations):
+            self.logger.sim_logger.info(f"Starting negotiation {i+1}/{num_negotiations}")
             print(f"\n=== Starting Negotiation {i+1}/{num_negotiations} ===")
+
+            # Generate unique simulation ID
+            sim_id = f"sim_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{i+1}"
+            self.logger.sim_logger.info(f"Simulation ID: {sim_id}")
 
             # Load seed and personalities
             if specific_seed:
                 seed = specific_seed
+                self.logger.sim_logger.info(f"Using specific seed: {seed.seed_id} - {seed.item}")
             else:
                 seed = self.get_next_seed()
 
             if not seed:
+                self.logger.sim_logger.warning("No more seeds available!")
                 print("No more seeds available!")
                 break
 
             buyer_personality, seller_personality = self.personality_deck.select_two_personalities()
+            self.logger.log_simulation_start(
+                sim_id, seed.seed_id,
+                buyer_personality.__class__.__name__,
+                seller_personality.__class__.__name__
+            )
 
             # Create negotiation packet
             packet = self.create_negotiation_packet(seed, buyer_personality, seller_personality)
+            packet["sim_id"] = sim_id  # Add sim_id to packet
 
             # Update control function params with personality betas
             self.control_params.beta_b = buyer_personality.traits.beta
             self.control_params.beta_s = seller_personality.traits.beta
+            self.logger.sim_logger.debug(f"[{sim_id}] Control params - beta_b: {self.control_params.beta_b}, beta_s: {self.control_params.beta_s}")
 
             # Initialize negotiation state
             state = NegotiationState(
@@ -189,6 +240,7 @@ class SimulationRunner:
                 n_s_k=len(seed.extras_available) if seed.extras_available else 0,
                 l_k=0  # Number of extras included
             )
+            self.logger.sim_logger.debug(f"[{sim_id}] Initial state - Ps: ${seed.seller_min}, Pb: ${seed.buyer_max}, P_k: ${seed.seller_list}")
 
             # Initialize price state
             price_state = PriceState(
@@ -199,17 +251,28 @@ class SimulationRunner:
                 current_price=seed.seller_list,
                 turn_number=0
             )
+            self.logger.sim_logger.debug(f"[{sim_id}] Initial price state - seller_price: ${seed.seller_list}")
 
             # Reset prompt manager for new negotiation
             self.prompt_manager.reset_negotiation()
             self.price_dynamics.reset()
+            self.logger.sim_logger.debug(f"[{sim_id}] Reset managers for new negotiation")
 
             # Run the negotiation
+            negotiation_start = time.time()
+            self.logger.sim_logger.info(f"[{sim_id}] Starting negotiation turns...")
             result = self._run_single_negotiation(packet, state, price_state)
+            negotiation_duration = time.time() - negotiation_start
+
+            # Log outcome
+            self.logger.log_simulation_end(sim_id, result, negotiation_duration)
             results.append(result)
 
             # Store completed negotiation
             self.completed_negotiations.append(result)
+
+        total_duration = time.time() - start_time
+        self.logger.sim_logger.info(f"Simulation run complete. Total time: {total_duration:.2f}s, Average: {total_duration/len(results):.2f}s per negotiation")
 
         return results
 
@@ -229,6 +292,7 @@ class SimulationRunner:
         seed = packet["seed"]
         buyer_personality = packet["buyer_personality"]
         seller_personality = packet["seller_personality"]
+        sim_id = packet.get("sim_id", "unknown")
 
         # Track forced response flags
         forced_response = None
@@ -241,7 +305,9 @@ class SimulationRunner:
             state.r = turn
             price_state.turn_number = turn
             is_buyer_turn = (turn % 2 == 0)
+            speaker = "BUYER" if is_buyer_turn else "SELLER"
 
+            self.logger.sim_logger.info(f"[{sim_id}] Turn {turn}: {speaker}")
             print(f"\nTurn {turn}: {'Buyer' if is_buyer_turn else 'Seller'}")
 
             # Determine action and prompt based on turn number and state
@@ -249,11 +315,13 @@ class SimulationRunner:
                 # Buyer opener (forced)
                 action = "opener"
                 prompt = self.prompt_manager.get_forced_response_prompt("opener", True)
+                self.logger.sim_logger.debug(f"[{sim_id}] Turn {turn}: Forced action - {action}")
 
             elif turn == 1:
                 # Seller opener response (forced)
                 action = "opener_response"
                 prompt = self.prompt_manager.get_forced_response_prompt("opener", False)
+                self.logger.sim_logger.debug(f"[{sim_id}] Turn {turn}: Forced action - {action}")
 
             elif turn == 2:
                 # Buyer initial price offer (forced)
@@ -266,6 +334,7 @@ class SimulationRunner:
                 price_state.initial_buyer_price = initial_offer
                 price_state.current_price = initial_offer
                 state.P_k = initial_offer
+                self.logger.sim_logger.info(f"[{sim_id}] Turn {turn}: Initial buyer offer - ${initial_offer}")
 
                 # Get price adjust prompt for initial offer
                 prompt = self.prompt_manager.get_price_adjust_prompt(
@@ -279,6 +348,7 @@ class SimulationRunner:
 
             else:
                 # Turn 3+ - Control function driven
+                self.logger.sim_logger.debug(f"[{sim_id}] Turn {turn}: Control function driven turn")
 
                 # Check for forced responses
                 if forced_response == "accept":
@@ -289,6 +359,7 @@ class SimulationRunner:
                         is_buyer_turn,
                         price=state.P_k
                     )
+                    self.logger.sim_logger.info(f"[{sim_id}] Turn {turn}: Forced response - ACCEPT")
                     forced_response = None
 
                 elif forced_response == "reject":
@@ -299,6 +370,7 @@ class SimulationRunner:
                         is_buyer_turn,
                         price=state.P_k
                     )
+                    self.logger.sim_logger.info(f"[{sim_id}] Turn {turn}: Forced response - REJECT")
                     forced_response = None
                     action_blocked = True  # Block actions after rejection
 
@@ -307,10 +379,12 @@ class SimulationRunner:
                     prompt = self.prompt_manager.get_forced_response_prompt(
                         "clarify_respond", is_buyer_turn
                     )
+                    self.logger.sim_logger.info(f"[{sim_id}] Turn {turn}: Forced response - CLARIFY_RESPOND")
                     forced_response = None
 
                 elif action_blocked:
                     # After rejection, negotiation ends
+                    self.logger.sim_logger.info(f"[{sim_id}] Negotiation ended after rejection")
                     print("Negotiation ended after rejection.")
                     packet["outcome"] = "no_deal"
                     packet["deal_closed"] = False
@@ -321,6 +395,7 @@ class SimulationRunner:
                     action, prompt, control_features = self._select_action_and_prompt(
                         state, price_state, is_buyer_turn, packet
                     )
+                    self.logger.log_turn(sim_id, turn, speaker, action)
 
                     # Check if action triggers forced response
                     if action == "close":
@@ -329,19 +404,26 @@ class SimulationRunner:
                         personality = seller_personality if is_buyer_turn else buyer_personality
                         if random.random() < personality.traits.p:
                             forced_response = "accept"
+                            self.logger.sim_logger.debug(f"[{sim_id}] Close action - forcing ACCEPT next turn (p={personality.traits.p})")
                         else:
                             forced_response = "reject"
+                            self.logger.sim_logger.debug(f"[{sim_id}] Close action - forcing REJECT next turn (p={personality.traits.p})")
 
                     elif action == "clarify":
                         # Next turn must be clarify_respond
                         forced_response = "clarify_respond"
+                        self.logger.sim_logger.debug(f"[{sim_id}] Clarify action - forcing CLARIFY_RESPOND next turn")
 
             # Generate response using LLM
+            llm_start = time.time()
             response = self._generate_response(packet, state, prompt)
+            llm_duration = time.time() - llm_start
+            self.logger.log_llm_call(sim_id, prompt[:200] + "...", response[:200] + "...", llm_duration, success=True)
 
             # Add to dialog
             speaker = "BUYER" if is_buyer_turn else "SELLER"
             packet["dialog"].append((speaker, response))
+            self.logger.log_turn(sim_id, turn, speaker, action, response)
 
             # Update state based on action
             if action == "price_adjust" and turn > 2:
@@ -352,13 +434,17 @@ class SimulationRunner:
                     is_buyer_turn
                 )
                 if was_conceded:
+                    self.logger.sim_logger.info(f"[{sim_id}] Price adjustment - {speaker} moved from ${state.P_k:.2f} to ${new_price:.2f}")
                     price_state = self.price_dynamics.update_state_with_new_price(
                         price_state, new_price, is_buyer_turn
                     )
                     state.P_k = new_price
+                else:
+                    self.logger.sim_logger.debug(f"[{sim_id}] Price adjustment - {speaker} held at ${state.P_k:.2f}")
 
             elif action == "accept":
                 # Deal accepted
+                self.logger.sim_logger.info(f"[{sim_id}] DEAL ACCEPTED at price: ${state.P_k}")
                 print(f"Deal accepted at price: ${state.P_k}")
                 packet["outcome"] = "deal"
                 packet["deal_closed"] = True
@@ -368,12 +454,15 @@ class SimulationRunner:
                 midpoint = (seed.buyer_max + seed.seller_min) / 2
                 packet["buyer_favorable"] = state.P_k < midpoint
                 packet["seller_favorable"] = state.P_k > midpoint
+
+                self.logger.sim_logger.info(f"[{sim_id}] Deal analysis - midpoint: ${midpoint:.2f}, buyer_favorable: {packet['buyer_favorable']}, seller_favorable: {packet['seller_favorable']}")
                 break
 
             # Check for convergence
             if turn > 5:  # After some initial turns
                 price_gap = self.price_dynamics.calculate_price_gap(price_state)
                 if price_gap < 0.01 * seed.seller_list:  # Less than 1% of list price
+                    self.logger.sim_logger.info(f"[{sim_id}] Prices CONVERGED (gap: ${price_gap:.2f} < 1% of ${seed.seller_list}). Deal at ${state.P_k}")
                     print(f"Prices converged. Deal at ${state.P_k}")
                     packet["outcome"] = "deal"
                     packet["deal_closed"] = True
@@ -383,6 +472,8 @@ class SimulationRunner:
                     packet["buyer_favorable"] = state.P_k < midpoint
                     packet["seller_favorable"] = state.P_k > midpoint
                     break
+                else:
+                    self.logger.sim_logger.debug(f"[{sim_id}] Price gap: ${price_gap:.2f} (${price_state.buyer_price:.2f} - ${price_state.seller_price:.2f})")
 
             # Update state for next turn
             state.prev_s = control_features.get('s', 0)
@@ -391,7 +482,11 @@ class SimulationRunner:
         if packet["outcome"] is None:
             packet["outcome"] = "no_deal"
             packet["deal_closed"] = False
+            self.logger.sim_logger.info(f"[{sim_id}] Maximum turns ({self.max_turns}) reached without agreement")
             print("Maximum turns reached without agreement.")
+
+        # Log final outcome
+        self.logger.sim_logger.info(f"[{sim_id}] Negotiation complete - outcome: {packet['outcome']}, turns: {len(packet['dialog'])}, final_price: {packet.get('final_price', 'N/A')}")
 
         return packet
 
@@ -409,6 +504,7 @@ class SimulationRunner:
         Returns:
             Tuple of (action, prompt, control_features)
         """
+        sim_id = packet.get("sim_id", "unknown")
         personality = packet["buyer_personality"] if is_buyer else packet["seller_personality"]
 
         # Evaluate control function
@@ -419,6 +515,13 @@ class SimulationRunner:
 
         # Get action probabilities
         action_probs = evaluation['action_probs']
+
+        # Log control decision
+        self.logger.log_control_decision(sim_id, state.r, {
+            'features': control_features,
+            'action_probs': action_probs,
+            'recommended_action': evaluation.get('recommended_action')
+        })
 
         # Check for ultimatum conditions
         if self.prompt_manager.should_add_ultimatum_to_pool(
@@ -435,6 +538,8 @@ class SimulationRunner:
         actions = list(action_probs.keys())
         probabilities = list(action_probs.values())
         action = np.random.choice(actions, p=probabilities)
+
+        self.logger.sim_logger.info(f"[{sim_id}] Selected action: {action} (prob: {action_probs.get(action, 0):.3f})")
 
         # Get appropriate prompt for action
         if action == "ultimatum":
@@ -501,7 +606,7 @@ class SimulationRunner:
 
         return response.strip()
 
-    def save_results(self, output_base: str = None, save_structured: bool = True):
+    def save_results(self, output_base: Optional[str] = None, save_structured: bool = True):
         """
         Save completed negotiations with datetime labeling and organized structure.
 
@@ -509,9 +614,13 @@ class SimulationRunner:
             output_base: Base path for output directory (default: data/runs/)
             save_structured: Whether to also save structured (non-flattened) version
         """
+        self.logger.sim_logger.info("="*60)
+        self.logger.sim_logger.info("Saving results...")
+
         # Generate timestamp for this run
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         run_id = f"run_{timestamp}"
+        self.logger.sim_logger.info(f"Run ID: {run_id}")
 
         # Determine output directory
         if output_base is None:
@@ -523,6 +632,7 @@ class SimulationRunner:
         # Create run-specific directory
         run_dir = os.path.join(output_base, run_id)
         os.makedirs(run_dir, exist_ok=True)
+        self.logger.sim_logger.info(f"Output directory: {run_dir}")
 
         # Save metadata about the run
         metadata = {
@@ -537,9 +647,12 @@ class SimulationRunner:
             "deals_failed": sum(1 for n in self.completed_negotiations if not n.get("deal_closed"))
         }
 
+        self.logger.sim_logger.info(f"Run statistics - Total: {metadata['total_negotiations']}, Deals: {metadata['deals_completed']}, No-deals: {metadata['deals_failed']}")
+
         metadata_file = os.path.join(run_dir, "metadata.json")
         with open(metadata_file, 'w') as f:
             json.dump(metadata, f, indent=2)
+        self.logger.sim_logger.debug(f"Saved metadata to {metadata_file}")
 
         # Save flattened dataset for training (JSONL format)
         flattened_file = os.path.join(run_dir, f"dataset_{timestamp}.jsonl")
@@ -625,14 +738,22 @@ class SimulationRunner:
             f.write(f"Total Negotiations: {metadata['total_negotiations']}\n")
             f.write(f"Deals Completed: {metadata['deals_completed']}\n")
             f.write(f"Deals Failed: {metadata['deals_failed']}\n")
-            f.write(f"Success Rate: {metadata['deals_completed']/metadata['total_negotiations']*100:.1f}%\n\n")
+            success_rate = (metadata['deals_completed']/metadata['total_negotiations']*100) if metadata['total_negotiations'] > 0 else 0
+            f.write(f"Success Rate: {success_rate:.1f}%\n\n")
 
             if metadata['deals_completed'] > 0:
                 prices = [n.get("final_price", 0) for n in self.completed_negotiations if n.get("deal_closed")]
-                avg_price = sum(prices) / len(prices)
-                f.write(f"Average Final Price: ${avg_price:.2f}\n")
-                f.write(f"Min Price: ${min(prices):.2f}\n")
-                f.write(f"Max Price: ${max(prices):.2f}\n")
+                if prices:
+                    avg_price = sum(prices) / len(prices)
+                    f.write(f"Average Final Price: ${avg_price:.2f}\n")
+                    f.write(f"Min Price: ${min(prices):.2f}\n")
+                    f.write(f"Max Price: ${max(prices):.2f}\n")
+
+        # Log saved files
+        self.logger.sim_logger.info(f"Saved flattened dataset to {flattened_file}")
+        if save_structured:
+            self.logger.sim_logger.info(f"Saved structured data to negotiations_structured_{timestamp}.json")
+        self.logger.sim_logger.info(f"Saved summary to summary_{timestamp}.txt")
 
         print(f"\n=== Save Results ===")
         print(f"Saved {len(self.completed_negotiations)} negotiations to: {run_dir}")
@@ -642,10 +763,13 @@ class SimulationRunner:
             print(f"  - Structured data: negotiations_structured_{timestamp}.json")
         print(f"  - Summary: summary_{timestamp}.txt")
 
+        self.logger.sim_logger.info("Results saved successfully!")
+        self.logger.sim_logger.info("="*60)
+
         return run_dir  # Return the directory path for reference
 
 
-def combine_runs(run_directories: List[str], output_file: str = None):
+def combine_runs(run_directories: List[str], output_file: Optional[str] = None):
     """
     Combine multiple simulation runs into a single dataset file.
 
@@ -696,6 +820,13 @@ def combine_runs(run_directories: List[str], output_file: str = None):
 def main():
     """Main entry point for simulation runner."""
     import argparse
+    import logging
+
+    # Initialize logger first
+    logger = setup_logger()
+    logger.sim_logger.info("="*60)
+    logger.sim_logger.info("NEGOTIATION SIMULATION RUNNER STARTED")
+    logger.sim_logger.info("="*60)
 
     parser = argparse.ArgumentParser(description="Run negotiation simulations")
 
@@ -717,8 +848,8 @@ def main():
                        help="Number of negotiations to simulate (default: 2)")
     parser.add_argument("--max-turns", type=int, default=20,
                        help="Maximum turns per negotiation (default: 20)")
-    parser.add_argument("--model", type=str, default="llama3.3:70b",
-                       help="Model name for LLM (default: llama3.3:70b)")
+    parser.add_argument("--model", type=str, default="Qwen/Qwen2.5-14B-Instruct",
+                       help="Model name for LLM (default: Qwen/Qwen2.5-14B-Instruct)")
 
     # Output configuration
     parser.add_argument("--output-dir", type=str, default=None,
@@ -731,11 +862,10 @@ def main():
     # Handle seed-specific configuration
     seed_directory = args.seed_dir
     if args.seed_file:
-        # If specific seed file is provided, we'll need to modify SimulationRunner
-        # to handle single file loading
         print(f"Loading specific seed file: {args.seed_file}")
-        # For now, use the directory containing the file
-        seed_directory = os.path.dirname(args.seed_file) or "."
+        if not os.path.dirname(args.seed_file):
+            args.seed_file = os.path.join(args.seed_dir, args.seed_file)
+        seed_directory = args.seed_dir
 
     # Create simulation runner
     runner = SimulationRunner(
@@ -781,16 +911,24 @@ def main():
         save_structured=not args.no_structured
     )
 
+    logger.sim_logger.info("="*60)
+    logger.sim_logger.info("SIMULATION COMPLETE")
+    logger.sim_logger.info(f"Generated {len(results)} negotiations")
+
     print("\nSimulation complete!")
     print(f"Generated {len(results)} negotiations")
 
     # Print summary statistics
     deals_made = sum(1 for r in results if r.get("deal_closed"))
     print(f"Deals completed: {deals_made}/{len(results)}")
+    logger.sim_logger.info(f"Final statistics - Deals: {deals_made}/{len(results)}")
 
     if deals_made > 0:
         avg_price = sum(r.get("final_price", 0) for r in results if r.get("deal_closed")) / deals_made
         print(f"Average final price: ${avg_price:.2f}")
+        logger.sim_logger.info(f"Average final price: ${avg_price:.2f}")
+
+    logger.sim_logger.info("="*60)
 
 
 if __name__ == "__main__":

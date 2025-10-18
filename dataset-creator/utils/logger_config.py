@@ -64,7 +64,7 @@ class SimulationLogger:
 
     def _setup_logger(self, name: str, filename: str, level: int) -> logging.Logger:
         """
-        Set up a logger with file rotation.
+        Set up a logger with file overwrite mode.
 
         Args:
             name: Logger name
@@ -80,11 +80,10 @@ class SimulationLogger:
         # Remove existing handlers to avoid duplicates
         logger.handlers.clear()
 
-        # File handler with rotation (10MB max, keep 5 backups)
-        file_handler = logging.handlers.RotatingFileHandler(
+        # File handler in write mode to overwrite existing logs
+        file_handler = logging.FileHandler(
             self.log_dir / filename,
-            maxBytes=10 * 1024 * 1024,  # 10MB
-            backupCount=5
+            mode='w'  # Overwrite mode
         )
 
         # Detailed formatter
@@ -114,8 +113,8 @@ class SimulationLogger:
         logger.setLevel(logging.INFO)
         logger.handlers.clear()
 
-        # File handler without rotation for JSONL format
-        file_handler = logging.FileHandler(self.log_dir / filename)
+        # File handler in write mode for JSONL format
+        file_handler = logging.FileHandler(self.log_dir / filename, mode='w')
 
         # Minimal formatter - just the message (which will be JSON)
         formatter = logging.Formatter('%(message)s')
