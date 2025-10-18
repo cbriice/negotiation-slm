@@ -16,13 +16,13 @@ class LLMGenerationError(SimulationError):
     pass
 
 
-class OllamaConnectionError(LLMGenerationError):
-    """Failed to connect to Ollama service."""
+class ModelLoadError(LLMGenerationError):
+    """Failed to load model from Hugging Face."""
     pass
 
 
-class OllamaModelError(LLMGenerationError):
-    """Error with the Ollama model (not loaded, OOM, etc)."""
+class ModelInferenceError(LLMGenerationError):
+    """Error during model inference (OOM, generation failure, etc)."""
     pass
 
 

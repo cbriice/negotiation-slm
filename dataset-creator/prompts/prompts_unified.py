@@ -20,7 +20,9 @@ def get_unified_prompt(negotiation_packet: dict, state: NegotiationState, action
     
     # build conversation history
     dialog = negotiation_packet["dialog"]
-    conversation_history = [f"{side}: {msg}" for side, msg in dialog]
+    conversation_history = "\n".join(
+        [f"{side.upper()}: {msg.strip()}" for side, msg in dialog]
+    )
     history_string = "\n".join(conversation_history)
 
     # since buyer always has first turn (turn index 0) you can deduce whose turn it is from turn counter in state
@@ -34,43 +36,44 @@ def get_unified_prompt(negotiation_packet: dict, state: NegotiationState, action
 
     # get seed context
     seed_context = seed["context"]
-    context_info = [f"{k}: {val}" for k, val in seed_context]
+    context_info = [f"{k}: {val}" for k, val in seed_context.items()]
     # add notes
     context_info.append(seed["notes"])
     context = "\n".join(context_info)
 
     return f"""
-        [ROLE] 
-        You are a negotiation simulation model that generates synthetic dialogues for dataset creation. You will generate a dialog between Buyer and Seller based on descriptions of their personalities and prompts for each turn.
-        
-        [CONTEXT]
+        <|im_start|>system
+        You are a negotiation simulation model that generates synthetic dialogues for dataset creation. You will generate a dialog between Buyer and Seller based on their personalities and prompts for each turn. 
         **IMPORTANT**: 
         Buyer and Seller are negotiating for {seed.quantity} {seed.condition} {seed.item}.
-        The item is listed for ${seed.seller_list}. 
-        Negotiation is taking place in a(n) {seed.locality} area.
-        Context for this negotiation: 
+        List price: ${seed.seller_list} 
+        Area: {seed.locality}
+        Context: 
         {context}
 
         Buyer: {buyer_personality.description}
-        Buyer doesn't want to pay more than ${seed.buyer_max}.
+        Buyer max price: ${seed.buyer_max}.
 
         Seller: {seller_personality.description}
-        Seller doesn't want to sell for less than ${seed.seller_min}.
-        The seller can potentially offer these extras: {seed.extras_available}.
-
-        CONVERSATION HISTORY:
-        {history_string}
+        Seller min price: ${seed.seller_min}.
+        Potential extras: {seed.extras_available}.
 
         Current proposed price: {state.P_k}
 
+        CONVERSATION HISTORY:
+        {history_string}
+        <|im_end|>
+        <|im_start|>user
         [INSTRUCTIONS]
-        You are responding as the {turn}. PROMPT: {action_prompt}
-
+        You are the {turn}. PROMPT: {action_prompt}
+        
         Generate a response according to the prompt and these critical rules:
-          - Always follow the prompt, current role and personality description when generating responses. Respond how the personality would given the sentiment of the prompt.
-          - Output a response string and nothing else. No formatting or meta-commentary.
-          - Do not make up your own price. If referring to price, use the price in the prompt. If price isn't in the prompt, use the current proposed price.
-          - Do not deviate from the prompt or structure. You are generating ONE response at a time.
+          - Use natural, coherent language and phrasing following the PROMPT, current role and personality description when generating responses. 
+          - Your output must contain only the response spoken by the {turn}. Do NOT include quotes, role labels, or any explanation.
+          - If you mention price, use current proposed or price in prompt.
+          - Never deviate from the PROMPT or structure. You are generating ONE response at a time.
+        <|im_end|>
+        <|im_start|>assistant<|im_end|>
     """
 
 # =============================================================================

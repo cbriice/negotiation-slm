@@ -17,7 +17,7 @@ All of the prompt files and the personality deck are in prompts/
   - Ultimatum is a special case prompt category that is added to the pool of possible prompts when `eta` in range from personality card. Added to prompt pool when round pressure is high: `A_k` >= 0.7, and is in pool for price adjust as well as close. In the case that one side uses an ultimatum prompt, it's treated as a close proposal and the other side must respond with either accept or reject based on the outcome of random choice based on `p` (same outline in sim_documentation.md)
 
 ### Zero-shot generation prompt
-The system prompt in prompts/prompts_unified.py will contain accumulated context of the conversation, current price and seed information that the `Llama-3.3-70B` will generate dialog according to using `/generate` in a zero-shot style, to maximize control of the model's behavior and keep context concise. The action-specific prompt is also injected into this system prompt. 
+The system prompt in prompts/prompts_unified.py will contain accumulated context of the conversation, current price and seed information that the `Qwen/Qwen2.5-14B-Instruct` will generate dialog according to using `/generate` in a zero-shot style, to maximize control of the model's behavior and keep context concise. The action-specific prompt is also injected into this system prompt. 
 As negotiation progresses, each dialog output from the model is appended to the dialog dict contained in the negotiation packet dict. This will be unpacked and injected into the system prompt string every time get_unified_prompt is called.
 
 ### Prompt duplication prevention

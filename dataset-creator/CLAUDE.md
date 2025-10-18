@@ -4,13 +4,16 @@ You are a senior machine learning architect with expertise in Python and experie
 [CONTEXT] 
 The overall purpose is to create a comprehensive negotiation dataset to train a small language model on (7B -13B params) using an existing training lab module. The dataset will cover a large range of negotiation styles, nuances and behaviors, so the model I'm fine tuning doesn't overfit to specific styles or behavior. The negotiation dialogs generated should be goal-driven, purposeful, and when combined with SFT training give an SLM the necessary training data to become an expert negotiator. Negotiation simulations will be prompt engineered using prompts found in prompts/ such that a single language model can generate both sides of the negotiation dialogue at once, without needing self-play between two model instances.
 
+**Important rules**:
+  - don't replace removed code with comments. save yourself the tokens
+
 # Architecture notes
 
 ## Model directions
-The language model used to generate negotiation dialogs will be the `Llama-3.3 70B` model. It will be loaded using ollama and ran locally using a hybrid architecture: loaded in 4-bit, most weights in system RAM, a chunk offloaded to GPU to optimize memory usage while letting the GPU handle the hot layers. 
+The language model used to generate negotiation dialogs will be the `Qwen/Qwen2.5-14B-Instruct` model loaded and ran through Huggingface, in 4 bit K-quant with mixed precision mode for performance optimization. 
 
 ### Response generation
-Responses will be generated zero-shot style using `ollama.generate()`. Conversation history will be accumulated in a prompt and injected underneath the system prompt from `prompts.prompts_system.get_unified_prompt`, and then the action-specific prompt which the backend decides is appropriate for the next turn will be placed as the next action for the model to generate a response according to. The model's output string should be caught and added to a state conversation JSON, which follows the template in schema/negotiation_json_template.jsonl. 
+Responses will be generated zero-shot style. Conversation history will be accumulated in a prompt and injected underneath the system prompt from `prompts.prompts_system.get_unified_prompt`, and then the action-specific prompt which the backend decides is appropriate for the next turn will be placed as the next action for the model to generate a response according to. The model's output string should be caught and added to a state conversation JSON, which follows the template in schema/negotiation_json_template.jsonl. 
 
 ## Simulation architecture
 See info/sim_documentation.md. 

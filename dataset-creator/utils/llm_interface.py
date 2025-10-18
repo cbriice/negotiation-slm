@@ -1,40 +1,44 @@
 """
-LLM interface for negotiation dialogue generation using Ollama.
+LLM interface for negotiation dialogue generation using Hugging Face transformers.
 
-This module provides a robust interface to the Llama-3.3 70B model via Ollama,
+This module provides a robust interface to the Qwen2.5-14B-Instruct model via transformers,
 with comprehensive error handling, retries, and fallback mechanisms.
 """
 
-import ollama
+import torch
+from transformers import AutoTokenizer, AutoModelForCausalLM
 from typing import Optional, Dict, Any, List
 import time
 import re
 from dataclasses import dataclass
+import gc
 
 from utils.logger_config import get_logger
 from utils.exceptions import (
     LLMGenerationError,
-    OllamaConnectionError,
-    OllamaModelError
+    ModelLoadError,
+    ModelInferenceError
 )
 
 
 @dataclass
 class LLMConfig:
     """Configuration for LLM interface."""
-    model: str = "llama3.3:70b"
-    fallback_model: Optional[str] = "llama3.1:8b"  # Smaller fallback model
-    temperature: float = 0.5
+    model: str = "Qwen/Qwen2.5-14B-Instruct"
+    fallback_model: Optional[str] = "Qwen/Qwen2.5-7B-Instruct"  # Smaller fallback model
+    temperature: Optional[float] = None  # Temperature should be provided per generation from personality
     max_retries: int = 3
     retry_backoff: float = 2.0
     timeout: int = 60  # seconds
     max_tokens: int = 256
     use_gpu: bool = True
-    gpu_layers: int = 10  # Number of layers to offload to GPU
+    device_map: str = "auto"  # Auto device mapping for multi-GPU/CPU
+    load_in_4bit: bool = True  # Use 4-bit quantization to save memory
+    torch_dtype: str = "auto"  # Data type for model weights
 
 
 class LLMInterface:
-    """Interface for LLM generation with Ollama."""
+    """Interface for LLM generation with Hugging Face transformers."""
 
     def __init__(self, config: Optional[LLMConfig] = None):
         """
@@ -50,63 +54,136 @@ class LLMInterface:
         self.logger = self.sim_logger_instance.sim_logger  # Main logger for warnings/info
         self.llm_logger = self.sim_logger_instance.llm_logger  # For LLM-specific logging
         self.error_logger = self.sim_logger_instance.error_logger  # For errors
-        self.client = ollama.Client()
 
-        # Verify model availability
-        self._verify_models()
+        # Initialize models and tokenizers
+        self.model = None
+        self.tokenizer = None
+        self.fallback_model = None
+        self.fallback_tokenizer = None
+
+        # Device management
+        self.device = "cuda" if torch.cuda.is_available() and self.config.use_gpu else "cpu"
+
+        # Load primary model
+        self._load_primary_model()
 
         # Track usage statistics
-        self.stats = {
+        self.stats: Dict[str, float] = {
             "total_calls": 0,
             "successful_calls": 0,
             "failed_calls": 0,
             "fallback_used": 0,
             "total_tokens": 0,
-            "total_time": 0
+            "total_time": 0.0
         }
 
-    def _verify_models(self):
-        """Verify that required models are available."""
+    def _load_primary_model(self):
+        """Load the primary model and tokenizer."""
         try:
-            models = self.client.list()
-            available_models = [m['name'] for m in models.get('models', [])]
+            self.logger.info(f"Loading model {self.config.model}...")
 
-            # Check primary model
-            if self.config.model not in available_models:
-                self.logger.warning(
-                    f"Primary model {self.config.model} not found. "
-                    f"Available models: {available_models}"
-                )
-                # Try to pull the model
-                self._pull_model(self.config.model)
+            # Load tokenizer
+            self.tokenizer = AutoTokenizer.from_pretrained(
+                self.config.model,
+                trust_remote_code=True
+            )
 
-            # Check fallback model
-            if (self.config.fallback_model and
-                self.config.fallback_model not in available_models):
-                self.logger.warning(
-                    f"Fallback model {self.config.fallback_model} not found"
+            # Set pad token if not set (some models don't have it)
+            if self.tokenizer.pad_token is None:
+                self.tokenizer.pad_token = self.tokenizer.eos_token
+
+            # Configure model loading kwargs
+            model_kwargs = {
+                "trust_remote_code": True,
+                "device_map": self.config.device_map if self.config.use_gpu else None
+            }
+
+            # Add quantization config if using 4-bit
+            if self.config.load_in_4bit and self.config.use_gpu:
+                from transformers import BitsAndBytesConfig
+                model_kwargs["quantization_config"] = BitsAndBytesConfig(
+                    load_in_4bit=True,
+                    bnb_4bit_compute_dtype=torch.float16,
+                    bnb_4bit_quant_type="nf4",
+                    bnb_4bit_use_double_quant=True
                 )
+                # Don't pass load_in_4bit separately when using quantization_config
+
+            # Set dtype (torch_dtype is deprecated)
+            if self.config.torch_dtype == "auto":
+                model_kwargs["dtype"] = "auto"
+            else:
+                model_kwargs["dtype"] = getattr(torch, self.config.torch_dtype, torch.float16)
+
+            # Load model
+            self.model = AutoModelForCausalLM.from_pretrained(
+                self.config.model,
+                **model_kwargs
+            )
+
+            self.logger.info(f"Successfully loaded {self.config.model}")
 
         except Exception as e:
-            raise OllamaConnectionError(f"Failed to connect to Ollama: {e}")
+            raise ModelLoadError(f"Failed to load model {self.config.model}: {e}")
 
-    def _pull_model(self, model_name: str):
-        """Attempt to pull a model from Ollama registry."""
+    def _load_fallback_model(self):
+        """Load the fallback model if not already loaded."""
+        if self.fallback_model is not None:
+            return  # Already loaded
+
+        if not self.config.fallback_model:
+            return  # No fallback configured
+
         try:
-            self.logger.info(f"Pulling model {model_name}...")
-            self.client.pull(model_name)
-            self.logger.info(f"Successfully pulled {model_name}")
-        except Exception as e:
-            raise OllamaModelError(f"Failed to pull model {model_name}: {e}")
+            self.logger.info(f"Loading fallback model {self.config.fallback_model}...")
 
-    def generate(self, prompt: str, temperature: Optional[float] = None,
+            # Load tokenizer
+            self.fallback_tokenizer = AutoTokenizer.from_pretrained(
+                self.config.fallback_model,
+                trust_remote_code=True
+            )
+
+            # Set pad token if not set (some models don't have it)
+            if self.fallback_tokenizer.pad_token is None:
+                self.fallback_tokenizer.pad_token = self.fallback_tokenizer.eos_token
+
+            # Configure model loading kwargs for smaller fallback model
+            model_kwargs = {
+                "trust_remote_code": True,
+                "device_map": self.config.device_map if self.config.use_gpu else None,
+                "dtype": torch.float16 if self.config.use_gpu else torch.float32
+            }
+
+            # Fallback model can use 4-bit too for memory efficiency
+            if self.config.load_in_4bit and self.config.use_gpu:
+                from transformers import BitsAndBytesConfig
+                model_kwargs["quantization_config"] = BitsAndBytesConfig(
+                    load_in_4bit=True,
+                    bnb_4bit_compute_dtype=torch.float16,
+                    bnb_4bit_quant_type="nf4",
+                    bnb_4bit_use_double_quant=True
+                )
+                # Don't pass load_in_4bit separately when using quantization_config
+
+            # Load model
+            self.fallback_model = AutoModelForCausalLM.from_pretrained(
+                self.config.fallback_model,
+                **model_kwargs
+            )
+
+            self.logger.info(f"Successfully loaded fallback {self.config.fallback_model}")
+
+        except Exception as e:
+            self.logger.warning(f"Failed to load fallback model: {e}")
+
+    def generate(self, prompt: str, temperature: float,
                 sim_id: str = "") -> str:
         """
         Generate response with retry logic and fallback.
 
         Args:
             prompt: The prompt to generate from
-            temperature: Override default temperature
+            temperature: Temperature for generation (from personality traits)
             sim_id: Simulation ID for logging
 
         Returns:
@@ -118,16 +195,17 @@ class LLMInterface:
         start_time = time.time()
         self.stats["total_calls"] += 1
 
-        temp = temperature or self.config.temperature
+        # Temperature is now required and must come from personality
+        temp = temperature
 
         # Try with primary model
         try:
             response = self._generate_with_retry(
-                prompt, self.config.model, temp, sim_id
+                prompt, self.model, self.tokenizer, temp, sim_id, is_primary=True
             )
             self.stats["successful_calls"] += 1
 
-        except (OllamaConnectionError, OllamaModelError) as e:
+        except Exception as e:
             self.logger.warning(
                 f"[{sim_id}] Primary model failed: {e}, trying fallback"
             )
@@ -135,11 +213,18 @@ class LLMInterface:
             # Try fallback model if available
             if self.config.fallback_model:
                 try:
-                    response = self._generate_with_retry(
-                        prompt, self.config.fallback_model, temp, sim_id
-                    )
-                    self.stats["fallback_used"] += 1
-                    self.stats["successful_calls"] += 1
+                    # Load fallback model if not already loaded
+                    self._load_fallback_model()
+
+                    if self.fallback_model and self.fallback_tokenizer:
+                        response = self._generate_with_retry(
+                            prompt, self.fallback_model, self.fallback_tokenizer,
+                            temp, sim_id, is_primary=False
+                        )
+                        self.stats["fallback_used"] += 1
+                        self.stats["successful_calls"] += 1
+                    else:
+                        raise LLMGenerationError("Fallback model failed to load")
 
                 except Exception as fallback_error:
                     self.stats["failed_calls"] += 1
@@ -158,57 +243,90 @@ class LLMInterface:
 
         return response
 
-    def _generate_with_retry(self, prompt: str, model: str,
-                           temperature: float, sim_id: str) -> str:
+    def _generate_with_retry(self, prompt: str, model, tokenizer,
+                           temperature: float, sim_id: str, is_primary: bool = True) -> str:
         """
-        Generate with exponential backoff retry.
+        Generate with exponential backoff retry using Hugging Face transformers.
 
         Args:
             prompt: Generation prompt
-            model: Model to use
+            model: Model instance to use
+            tokenizer: Tokenizer instance to use
             temperature: Temperature setting
             sim_id: Simulation ID for logging
+            is_primary: Whether this is the primary model
 
         Returns:
             Generated text
 
         Raises:
-            OllamaConnectionError: If connection fails
-            OllamaModelError: If model errors occur
+            LLMGenerationError: If generation fails
         """
         last_error = None
 
         for attempt in range(self.config.max_retries):
             try:
-                # Make generation request
-                response = self.client.generate(
-                    model=model,
-                    prompt=prompt,
-                    options={
-                        "temperature": temperature,
-                        "num_predict": self.config.max_tokens,
-                        "stop": ["\n\n", "BUYER:", "SELLER:"],  # Stop sequences
-                        "gpu_layers": self.config.gpu_layers if self.config.use_gpu else 0
-                    }
-                )
+                # Tokenize the input
+                inputs = tokenizer(prompt, return_tensors="pt", truncation=True,
+                                 max_length=2048)
 
-                # Extract and clean response
-                generated_text = self._parse_response(response)
+                # Move inputs to model device if using GPU
+                if self.config.use_gpu and hasattr(model, 'device'):
+                    inputs = {k: v.to(model.device) for k, v in inputs.items()}
+
+                # Generate with model
+                with torch.no_grad():
+                    # Base generation kwargs
+                    gen_kwargs = {
+                        **inputs,
+                        "max_new_tokens": self.config.max_tokens,
+                        "pad_token_id": tokenizer.pad_token_id or tokenizer.eos_token_id,
+                        "eos_token_id": tokenizer.eos_token_id,
+                        "stop_strings": ["\n\n", "BUYER:", "SELLER:"],
+                        "tokenizer": tokenizer  # Pass tokenizer for stop_strings
+                    }
+
+                    # Only add sampling parameters when actually sampling
+                    if temperature > 0:
+                        gen_kwargs.update({
+                            "do_sample": True,
+                            "temperature": temperature,
+                            "top_p": 0.95
+                        })
+                    else:
+                        gen_kwargs["do_sample"] = False
+
+                    outputs = model.generate(**gen_kwargs)
+
+                # Decode the output
+                generated_ids = outputs[0][inputs['input_ids'].shape[-1]:]
+                generated_text = tokenizer.decode(generated_ids, skip_special_tokens=True)
+
+                # Clean the response
+                generated_text = self._clean_response(generated_text)
 
                 # Validate response
                 if not generated_text or len(generated_text.strip()) < 10:
-                    raise OllamaModelError("Generated response too short or empty")
+                    raise ModelInferenceError("Generated response too short or empty")
+
+                # Track token usage
+                self.stats["total_tokens"] += len(generated_ids)
 
                 return generated_text
 
-            except ollama.ResponseError as e:
+            except torch.cuda.OutOfMemoryError as e:
                 last_error = e
                 self.logger.warning(
-                    f"[{sim_id}] Ollama response error (attempt {attempt + 1}): {e}"
+                    f"[{sim_id}] GPU OOM error (attempt {attempt + 1}): {e}"
                 )
+                # Try to free up memory
+                if self.config.use_gpu:
+                    torch.cuda.empty_cache()
+                    gc.collect()
 
-                if "out of memory" in str(e).lower():
-                    raise OllamaModelError(f"Model out of memory: {e}")
+                    # If OOM on primary, might need to offload more to CPU
+                    if is_primary and attempt == 0:
+                        self.logger.info("Attempting to clear GPU cache and retry...")
 
             except Exception as e:
                 last_error = e
@@ -223,30 +341,10 @@ class LLMInterface:
                 time.sleep(wait_time)
 
         # All retries failed
-        raise OllamaConnectionError(
+        raise LLMGenerationError(
             f"Failed after {self.config.max_retries} attempts: {last_error}"
         )
 
-    def _parse_response(self, response: Dict[str, Any]) -> str:
-        """
-        Parse and clean the Ollama response.
-
-        Args:
-            response: Raw response from Ollama
-
-        Returns:
-            Cleaned response text
-        """
-        # Get response text
-        if isinstance(response, dict):
-            text = response.get('response', '')
-        else:
-            text = str(response)
-
-        # Clean up the response
-        text = self._clean_response(text)
-
-        return text
 
     def _clean_response(self, text: str) -> str:
         """
@@ -290,14 +388,14 @@ class LLMInterface:
 
         return text
 
-    def batch_generate(self, prompts: List[str], temperature: Optional[float] = None,
+    def batch_generate(self, prompts: List[str], temperature: float,
                       sim_id: str = "") -> List[str]:
         """
         Generate responses for multiple prompts.
 
         Args:
             prompts: List of prompts
-            temperature: Temperature override
+            temperature: Temperature for generation (from personality traits)
             sim_id: Simulation ID
 
         Returns:
@@ -342,7 +440,7 @@ class LLMInterface:
             "failed_calls": 0,
             "fallback_used": 0,
             "total_tokens": 0,
-            "total_time": 0
+            "total_time": 0.0
         }
 
     def check_health(self) -> bool:
@@ -353,45 +451,77 @@ class LLMInterface:
             True if service is accessible and model is loaded
         """
         try:
-            # Try to list models
-            models = self.client.list()
-
-            # Check if primary model is loaded
-            available = [m['name'] for m in models.get('models', [])]
-            if self.config.model not in available:
-                self.logger.warning(f"Primary model {self.config.model} not loaded")
+            # Check if primary model and tokenizer are loaded
+            if self.model is None or self.tokenizer is None:
+                self.logger.warning("Primary model or tokenizer not loaded")
                 return False
 
             # Try a minimal generation to ensure it works
-            test_response = self.client.generate(
-                model=self.config.model,
-                prompt="Hello",
-                options={"num_predict": 5}
-            )
+            test_prompt = "Hello, this is a test."
+            inputs = self.tokenizer(test_prompt, return_tensors="pt", truncation=True)
 
-            return bool(test_response.get('response'))
+            # Move to device if using GPU
+            if self.config.use_gpu and hasattr(self.model, 'device'):
+                inputs = {k: v.to(self.model.device) for k, v in inputs.items()}
+
+            # Try to generate
+            with torch.no_grad():
+                outputs = self.model.generate(
+                    **inputs,
+                    max_new_tokens=5,
+                    do_sample=False
+                )
+
+            # Check if we got valid output
+            return outputs is not None and len(outputs[0]) > len(inputs['input_ids'][0])
 
         except Exception as e:
             self.error_logger.error(f"Health check failed: {e}")
             return False
 
+    def cleanup(self):
+        """Clean up resources and free memory."""
+        try:
+            # Clear GPU cache if using GPU
+            if self.config.use_gpu and torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+            # Delete models to free memory
+            if self.model is not None:
+                del self.model
+                self.model = None
+
+            if self.fallback_model is not None:
+                del self.fallback_model
+                self.fallback_model = None
+
+            # Run garbage collection
+            gc.collect()
+
+            self.logger.info("LLM interface cleaned up successfully")
+
+        except Exception as e:
+            self.error_logger.error(f"Error during cleanup: {e}")
+
 
 # Factory function for creating configured LLM interface
-def create_llm_interface(temperature: float = 0.5,
-                        use_fallback: bool = True) -> LLMInterface:
+def create_llm_interface(use_fallback: bool = True,
+                        load_in_4bit: bool = True) -> LLMInterface:
     """
     Create a configured LLM interface.
 
+    Note: Temperature should be provided per generation call from personality traits.
+
     Args:
-        temperature: Default temperature setting
         use_fallback: Whether to use fallback model
+        load_in_4bit: Whether to use 4-bit quantization
 
     Returns:
         Configured LLMInterface instance
     """
     config = LLMConfig(
-        temperature=temperature,
-        fallback_model="llama3.1:8b" if use_fallback else None
+        fallback_model="Qwen/Qwen2.5-7B-Instruct" if use_fallback else None,
+        load_in_4bit=load_in_4bit
     )
 
     return LLMInterface(config)

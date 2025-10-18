@@ -405,3 +405,114 @@ class Stubborn():
         traits.beta = 0
         traits.alpha = 0.85
         traits.temp = 0.5
+
+
+# -------------------------- Personality Deck Selector -------------------------------
+import random
+from typing import Optional
+
+class PersonalityDeck:
+    """Manages selection of personalities from the deck."""
+
+    def __init__(self):
+        """Initialize the personality deck with all available personalities."""
+        # Create factory functions - each personality will set its own trait values
+        # We pass dummy values since each personality class overwrites them
+        def create_traits():
+            return PersonalityTraits(
+                assertiveness=0.5, dominance=0.5, confidence_self=0.5,
+                confidence_deal=0.5, cooperativeness=0.5, flexibility=0.5,
+                patience=0.5, empathy=0.5, rationality=0.5, deceptiveness=0.5,
+                risk_tol=0.5, persistence=0.5, opportunism=0.5, strategic=0.5,
+                composure=0.5, beta=0.1, alpha=0.8, temp=0.6
+            )
+
+        self.personalities = [
+            lambda: StraightToPoint(create_traits()),
+            lambda: Desperate(create_traits()),
+            lambda: Skeptic(create_traits()),
+            lambda: Bluffer(create_traits()),
+            lambda: Confrontational(create_traits()),
+            lambda: Haggler(create_traits()),
+            lambda: WeakEmotional(create_traits()),
+            lambda: Rationalizer(create_traits()),
+            lambda: StoneWall(create_traits()),
+            lambda: Opportunist(create_traits()),
+            lambda: HighHorse(create_traits()),
+            lambda: Stubborn(create_traits())
+        ]
+
+        self.personality_names = [
+            "StraightToPoint", "Desperate", "Skeptic", "Bluffer",
+            "Confrontational", "Haggler", "WeakEmotional", "Rationalizer",
+            "StoneWall", "Opportunist", "HighHorse", "Stubborn"
+        ]
+
+    def select_personality(self, specific_name: Optional[str] = None):
+        """
+        Select a personality from the deck.
+
+        Args:
+            specific_name: Optional name of specific personality to select
+
+        Returns:
+            Instantiated personality object
+        """
+        if specific_name:
+            # Find personality by name
+            try:
+                index = self.personality_names.index(specific_name)
+                return self.personalities[index]()
+            except ValueError:
+                print(f"Personality '{specific_name}' not found. Selecting random.")
+
+        # Select random personality
+        personality_factory = random.choice(self.personalities)
+        return personality_factory()
+
+    def select_two_personalities(self, avoid_same: bool = True):
+        """
+        Select two personalities for buyer and seller.
+
+        Args:
+            avoid_same: If True, ensures different personalities are selected
+
+        Returns:
+            Tuple of (buyer_personality, seller_personality)
+        """
+        if avoid_same and len(self.personalities) > 1:
+            indices = random.sample(range(len(self.personalities)), 2)
+            buyer = self.personalities[indices[0]]()
+            seller = self.personalities[indices[1]]()
+        else:
+            buyer = self.select_personality()
+            seller = self.select_personality()
+
+        return buyer, seller
+
+    def get_personality_by_traits(self, target_traits: np.ndarray, top_k: int = 3):
+        """
+        Select personality most similar to target trait vector.
+
+        Args:
+            target_traits: Target trait vector (15 dimensions)
+            top_k: Number of top similar personalities to randomly select from
+
+        Returns:
+            Personality object most similar to target traits
+        """
+        similarities = []
+
+        for personality_factory in self.personalities:
+            personality = personality_factory()
+            similarity = np.dot(personality.trait_vector, target_traits) / (
+                np.linalg.norm(personality.trait_vector) * np.linalg.norm(target_traits)
+            )
+            similarities.append((personality, similarity))
+
+        # Sort by similarity
+        similarities.sort(key=lambda x: x[1], reverse=True)
+
+        # Select from top k
+        top_personalities = [p[0] for p in similarities[:top_k]]
+        return random.choice(top_personalities)
