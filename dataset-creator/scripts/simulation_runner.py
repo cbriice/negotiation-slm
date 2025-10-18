@@ -12,6 +12,7 @@ import numpy as np
 from typing import Dict, List, Optional, Tuple
 import sys
 import os
+from datetime import datetime
 
 # Add parent directory to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -31,7 +32,9 @@ class SimulationRunner:
 
     def __init__(self, seed_directory: str = "seeds/",
                  model_name: str = "llama3.3:70b",
-                 max_turns: int = 20):
+                 max_turns: int = 20,
+                 seed_category: Optional[str] = None,
+                 seed_selection_method: str = "random"):
         """
         Initialize simulation runner with all required components.
 
@@ -39,10 +42,17 @@ class SimulationRunner:
             seed_directory: Directory containing seed JSON files
             model_name: Model name for LLM
             max_turns: Maximum number of turns before ending negotiation
+            seed_category: Optional category filter for seeds
+            seed_selection_method: How to select seeds ("random", "sequential", "all")
         """
         # Initialize components
         self.seed_loader = MultiFileSeedLoader(seed_directory)
         self.seed_loader.load_all_seeds()
+
+        # Store configuration
+        self.seed_category = seed_category
+        self.seed_selection_method = seed_selection_method
+        self.seed_index = 0  # For sequential selection
 
         # Initialize control function with default params
         self.control_params = NegotiationParams(
@@ -88,25 +98,76 @@ class SimulationRunner:
             "final_price": None
         }
 
-    def run_simulation(self, num_negotiations: int = 1) -> List[Dict]:
+    def get_next_seed(self) -> Optional[NegotiationSeed]:
+        """
+        Get next seed based on configured selection method and category filter.
+
+        Returns:
+            NegotiationSeed or None if no seeds available
+        """
+        if self.seed_selection_method == "random":
+            # Random selection, respecting category filter
+            return self.seed_loader.get_random_seed(self.seed_category)
+
+        elif self.seed_selection_method == "sequential":
+            # Sequential selection
+            if self.seed_category:
+                # Get seeds for specific category
+                category_loader = self.seed_loader.get_loader_for_category(self.seed_category)
+                if category_loader:
+                    return category_loader.get_next_seed()
+            else:
+                # Get from all seeds sequentially
+                if self.seed_index < len(self.seed_loader.all_seeds):
+                    seed = self.seed_loader.all_seeds[self.seed_index]
+                    self.seed_index += 1
+                    return seed
+
+        elif self.seed_selection_method == "all":
+            # Return seeds in order (handled by iteration in run_simulation)
+            if self.seed_index < len(self.seed_loader.all_seeds):
+                seed = self.seed_loader.all_seeds[self.seed_index]
+                self.seed_index += 1
+                return seed
+
+        return None
+
+    def run_simulation(self, num_negotiations: int = 1,
+                      specific_seed: Optional[NegotiationSeed] = None) -> List[Dict]:
         """
         Run multiple negotiation simulations.
 
         Args:
             num_negotiations: Number of negotiations to simulate
+            specific_seed: Optional specific seed to use for all negotiations
 
         Returns:
             List of completed negotiation packets
         """
         results = []
 
+        # Determine number of iterations based on selection method
+        if self.seed_selection_method == "all":
+            # Run once for each seed
+            if self.seed_category:
+                category_loader = self.seed_loader.get_loader_for_category(self.seed_category)
+                total_seeds = len(category_loader.get_all_seeds()) if category_loader else 0
+            else:
+                total_seeds = len(self.seed_loader.all_seeds)
+            num_negotiations = total_seeds
+            print(f"Running negotiations for all {num_negotiations} seeds")
+
         for i in range(num_negotiations):
             print(f"\n=== Starting Negotiation {i+1}/{num_negotiations} ===")
 
             # Load seed and personalities
-            seed = self.seed_loader.get_random_seed()
+            if specific_seed:
+                seed = specific_seed
+            else:
+                seed = self.get_next_seed()
+
             if not seed:
-                print("No seeds available!")
+                print("No more seeds available!")
                 break
 
             buyer_personality, seller_personality = self.personality_deck.select_two_personalities()
@@ -440,19 +501,49 @@ class SimulationRunner:
 
         return response.strip()
 
-    def save_results(self, output_file: str = "negotiation_dataset.jsonl"):
+    def save_results(self, output_base: str = None, save_structured: bool = True):
         """
-        Save completed negotiations to JSONL file.
+        Save completed negotiations with datetime labeling and organized structure.
 
         Args:
-            output_file: Path to output file
+            output_base: Base path for output directory (default: data/runs/)
+            save_structured: Whether to also save structured (non-flattened) version
         """
-        # Create output directory if it doesn't exist
-        output_dir = os.path.dirname(output_file)
-        if output_dir and not os.path.exists(output_dir):
-            os.makedirs(output_dir)
+        # Generate timestamp for this run
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        run_id = f"run_{timestamp}"
 
-        with open(output_file, 'w') as f:
+        # Determine output directory
+        if output_base is None:
+            # Use data/runs/ as default, relative to script location
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            project_root = os.path.dirname(script_dir)
+            output_base = os.path.join(project_root, "data", "runs")
+
+        # Create run-specific directory
+        run_dir = os.path.join(output_base, run_id)
+        os.makedirs(run_dir, exist_ok=True)
+
+        # Save metadata about the run
+        metadata = {
+            "timestamp": timestamp,
+            "run_id": run_id,
+            "total_negotiations": len(self.completed_negotiations),
+            "max_turns": self.max_turns,
+            "model": self.llm_interface.config.model,
+            "seed_category": self.seed_category,
+            "seed_selection_method": self.seed_selection_method,
+            "deals_completed": sum(1 for n in self.completed_negotiations if n.get("deal_closed")),
+            "deals_failed": sum(1 for n in self.completed_negotiations if not n.get("deal_closed"))
+        }
+
+        metadata_file = os.path.join(run_dir, "metadata.json")
+        with open(metadata_file, 'w') as f:
+            json.dump(metadata, f, indent=2)
+
+        # Save flattened dataset for training (JSONL format)
+        flattened_file = os.path.join(run_dir, f"dataset_{timestamp}.jsonl")
+        with open(flattened_file, 'w') as f:
             for negotiation in self.completed_negotiations:
                 # Format for dataset - convert objects to serializable format
                 dataset_entry = {
@@ -470,24 +561,225 @@ class SimulationRunner:
                 }
                 f.write(json.dumps(dataset_entry) + '\n')
 
-        print(f"\nSaved {len(self.completed_negotiations)} negotiations to {output_file}")
+        # Save structured version if requested
+        if save_structured:
+            structured_file = os.path.join(run_dir, f"negotiations_structured_{timestamp}.json")
+            structured_data = []
+
+            for i, negotiation in enumerate(self.completed_negotiations):
+                # Keep more detailed structure with full objects
+                structured_entry = {
+                    "negotiation_id": i + 1,
+                    "seed": {
+                        "id": negotiation["seed"].seed_id,
+                        "category": negotiation["seed"].category,
+                        "item": negotiation["seed"].item,
+                        "seller_list": negotiation["seed"].seller_list,
+                        "seller_min": negotiation["seed"].seller_min,
+                        "buyer_max": negotiation["seed"].buyer_max,
+                        "extras_available": negotiation["seed"].extras_available
+                    },
+                    "personalities": {
+                        "buyer": {
+                            "type": negotiation["buyer_personality"].__class__.__name__,
+                            "traits": {
+                                "alpha": negotiation["buyer_personality"].traits.alpha,
+                                "beta": negotiation["buyer_personality"].traits.beta,
+                                "eta": negotiation["buyer_personality"].traits.eta,
+                                "p": negotiation["buyer_personality"].traits.p,
+                                "temp": negotiation["buyer_personality"].traits.temp
+                            }
+                        },
+                        "seller": {
+                            "type": negotiation["seller_personality"].__class__.__name__,
+                            "traits": {
+                                "alpha": negotiation["seller_personality"].traits.alpha,
+                                "beta": negotiation["seller_personality"].traits.beta,
+                                "eta": negotiation["seller_personality"].traits.eta,
+                                "p": negotiation["seller_personality"].traits.p,
+                                "temp": negotiation["seller_personality"].traits.temp
+                            }
+                        }
+                    },
+                    "dialog": negotiation["dialog"],
+                    "outcome": {
+                        "status": negotiation.get("outcome", "unknown"),
+                        "final_price": negotiation.get("final_price", None),
+                        "deal_closed": negotiation.get("deal_closed", False),
+                        "buyer_favorable": negotiation.get("buyer_favorable", False),
+                        "seller_favorable": negotiation.get("seller_favorable", False),
+                        "turn_count": len(negotiation["dialog"])
+                    }
+                }
+                structured_data.append(structured_entry)
+
+            with open(structured_file, 'w') as f:
+                json.dump(structured_data, f, indent=2)
+
+        # Create a summary file
+        summary_file = os.path.join(run_dir, f"summary_{timestamp}.txt")
+        with open(summary_file, 'w') as f:
+            f.write(f"=== Negotiation Run Summary ===\n")
+            f.write(f"Timestamp: {timestamp}\n")
+            f.write(f"Run ID: {run_id}\n")
+            f.write(f"Total Negotiations: {metadata['total_negotiations']}\n")
+            f.write(f"Deals Completed: {metadata['deals_completed']}\n")
+            f.write(f"Deals Failed: {metadata['deals_failed']}\n")
+            f.write(f"Success Rate: {metadata['deals_completed']/metadata['total_negotiations']*100:.1f}%\n\n")
+
+            if metadata['deals_completed'] > 0:
+                prices = [n.get("final_price", 0) for n in self.completed_negotiations if n.get("deal_closed")]
+                avg_price = sum(prices) / len(prices)
+                f.write(f"Average Final Price: ${avg_price:.2f}\n")
+                f.write(f"Min Price: ${min(prices):.2f}\n")
+                f.write(f"Max Price: ${max(prices):.2f}\n")
+
+        print(f"\n=== Save Results ===")
+        print(f"Saved {len(self.completed_negotiations)} negotiations to: {run_dir}")
+        print(f"  - Metadata: metadata.json")
+        print(f"  - Training dataset: dataset_{timestamp}.jsonl")
+        if save_structured:
+            print(f"  - Structured data: negotiations_structured_{timestamp}.json")
+        print(f"  - Summary: summary_{timestamp}.txt")
+
+        return run_dir  # Return the directory path for reference
+
+
+def combine_runs(run_directories: List[str], output_file: str = None):
+    """
+    Combine multiple simulation runs into a single dataset file.
+
+    Args:
+        run_directories: List of run directory paths to combine
+        output_file: Output file path (default: data/combined_dataset_<timestamp>.jsonl)
+    """
+    if output_file is None:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        project_root = os.path.dirname(script_dir)
+        output_file = os.path.join(project_root, "data", f"combined_dataset_{timestamp}.jsonl")
+
+    combined_entries = []
+    total_negotiations = 0
+
+    for run_dir in run_directories:
+        # Find the dataset JSONL file in the run directory
+        jsonl_files = [f for f in os.listdir(run_dir) if f.startswith("dataset_") and f.endswith(".jsonl")]
+
+        if not jsonl_files:
+            print(f"Warning: No dataset file found in {run_dir}")
+            continue
+
+        dataset_file = os.path.join(run_dir, jsonl_files[0])
+
+        # Read and combine the data
+        with open(dataset_file, 'r') as f:
+            for line in f:
+                combined_entries.append(line.strip())
+                total_negotiations += 1
+
+    # Save combined dataset
+    output_dir = os.path.dirname(output_file)
+    if output_dir and not os.path.exists(output_dir):
+        os.makedirs(output_dir, exist_ok=True)
+
+    with open(output_file, 'w') as f:
+        for entry in combined_entries:
+            f.write(entry + '\n')
+
+    print(f"Combined {total_negotiations} negotiations from {len(run_directories)} runs")
+    print(f"Saved to: {output_file}")
+
+    return output_file
 
 
 def main():
     """Main entry point for simulation runner."""
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Run negotiation simulations")
+
+    # Seed configuration options
+    parser.add_argument("--seed-dir", type=str, default="seeds/",
+                       help="Directory containing seed JSON files (default: seeds/)")
+    parser.add_argument("--seed-file", type=str,
+                       help="Use a specific seed file instead of directory")
+    parser.add_argument("--seed-category", type=str,
+                       help="Only use seeds from specific category")
+    parser.add_argument("--seed-id", type=int,
+                       help="Use a specific seed by ID (requires --seed-file)")
+    parser.add_argument("--seed-selection", type=str, choices=["random", "sequential", "all"],
+                       default="random",
+                       help="How to select seeds: random (default), sequential, or all")
+
+    # Simulation configuration
+    parser.add_argument("--num-negotiations", type=int, default=2,
+                       help="Number of negotiations to simulate (default: 2)")
+    parser.add_argument("--max-turns", type=int, default=20,
+                       help="Maximum turns per negotiation (default: 20)")
+    parser.add_argument("--model", type=str, default="llama3.3:70b",
+                       help="Model name for LLM (default: llama3.3:70b)")
+
+    # Output configuration
+    parser.add_argument("--output-dir", type=str, default=None,
+                       help="Base output directory for runs (default: data/runs/)")
+    parser.add_argument("--no-structured", action="store_true",
+                       help="Skip saving structured version of data")
+
+    args = parser.parse_args()
+
+    # Handle seed-specific configuration
+    seed_directory = args.seed_dir
+    if args.seed_file:
+        # If specific seed file is provided, we'll need to modify SimulationRunner
+        # to handle single file loading
+        print(f"Loading specific seed file: {args.seed_file}")
+        # For now, use the directory containing the file
+        seed_directory = os.path.dirname(args.seed_file) or "."
+
     # Create simulation runner
     runner = SimulationRunner(
-        seed_directory="../seeds/",
-        model_name="llama3.3:70b",
-        max_turns=20
+        seed_directory=seed_directory,
+        model_name=args.model,
+        max_turns=args.max_turns,
+        seed_category=args.seed_category,
+        seed_selection_method=args.seed_selection
     )
+
+    # Handle specific seed selection
+    specific_seed = None
+    if args.seed_file and args.seed_id:
+        # Load specific seed by ID from file
+        from utils.seed_loader import SeedLoader
+        single_loader = SeedLoader(args.seed_file)
+        specific_seed = single_loader.get_seed_by_id(args.seed_id)
+        if specific_seed:
+            print(f"Using seed ID {args.seed_id}: {specific_seed.item}")
+        else:
+            print(f"Seed ID {args.seed_id} not found in {args.seed_file}")
+            return
 
     # Run simulations
     print("Starting negotiation simulations...")
-    results = runner.run_simulation(num_negotiations=2)
+    print(f"Configuration:")
+    print(f"  - Seed directory: {seed_directory}")
+    print(f"  - Seed selection: {args.seed_selection}")
+    if args.seed_category:
+        print(f"  - Category filter: {args.seed_category}")
+    print(f"  - Number of negotiations: {args.num_negotiations}")
+    print(f"  - Max turns: {args.max_turns}")
+    print(f"  - Model: {args.model}")
+
+    results = runner.run_simulation(
+        num_negotiations=args.num_negotiations,
+        specific_seed=specific_seed
+    )
 
     # Save results
-    runner.save_results("../data/negotiation_dataset.jsonl")
+    runner.save_results(
+        output_base=args.output_dir,
+        save_structured=not args.no_structured
+    )
 
     print("\nSimulation complete!")
     print(f"Generated {len(results)} negotiations")
