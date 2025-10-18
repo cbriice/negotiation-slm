@@ -182,6 +182,7 @@ class SimulationLogger:
             f"[{sim_id}] Turn {turn} - {speaker} - Action: {action}"
         )
         if message:
+            message = str(message) if not isinstance(message, str) else message
             self.llm_logger.debug(
                 f"[{sim_id}] Turn {turn} - {speaker}: {message[:100]}..."
             )
@@ -233,7 +234,17 @@ class SimulationLogger:
 
     def log_metrics(self, metrics: Dict[str, Any]):
         """Log structured metrics as JSON."""
-        self.metrics_logger.info(json.dumps(metrics))
+
+        def serialize_object(obj):
+            """Custom serializer for objects."""
+            if hasattr(obj, 'to_dict'):
+                return obj.to_dict()
+            elif hasattr(obj, '__dict__'):
+                return obj.__dict__
+            else:
+                return str(obj)
+
+        self.metrics_logger.info(json.dumps(metrics, default=serialize_object))
 
     def get_logger(self, name: str) -> logging.Logger:
         """Get a specific logger by name."""
