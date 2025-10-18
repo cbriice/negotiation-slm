@@ -684,13 +684,13 @@ class SimulationRunner:
         self.logger.sim_logger.info(f"Run statistics - Total: {metadata['total_negotiations']}, Deals: {metadata['deals_completed']}, No-deals: {metadata['deals_failed']}")
 
         metadata_file = os.path.join(run_dir, "metadata.json")
-        with open(metadata_file, 'w') as f:
-            json.dump(metadata, f, indent=2)
+        with open(metadata_file, 'w', encoding='utf-8') as f:
+            json.dump(metadata, f, indent=2, ensure_ascii=False)
         self.logger.sim_logger.debug(f"Saved metadata to {metadata_file}")
 
         # Save flattened dataset for training (JSONL format)
         flattened_file = os.path.join(run_dir, f"dataset_{timestamp}.jsonl")
-        with open(flattened_file, 'w') as f:
+        with open(flattened_file, 'w', encoding='utf-8') as f:
             for negotiation in self.completed_negotiations:
                 # Format for dataset - convert objects to serializable format
                 dataset_entry = {
@@ -706,7 +706,7 @@ class SimulationRunner:
                     "buyer_favorable": negotiation.get("buyer_favorable", False),
                     "seller_favorable": negotiation.get("seller_favorable", False)
                 }
-                f.write(json.dumps(dataset_entry) + '\n')
+                f.write(json.dumps(dataset_entry, ensure_ascii=False) + '\n')
 
         # Save structured version if requested
         if save_structured:
@@ -760,12 +760,12 @@ class SimulationRunner:
                 }
                 structured_data.append(structured_entry)
 
-            with open(structured_file, 'w') as f:
-                json.dump(structured_data, f, indent=2)
+            with open(structured_file, 'w', encoding='utf-8') as f:
+                json.dump(structured_data, f, indent=2, ensure_ascii=False)
 
         # Create a summary file
         summary_file = os.path.join(run_dir, f"summary_{timestamp}.txt")
-        with open(summary_file, 'w') as f:
+        with open(summary_file, 'w', encoding='utf-8') as f:
             f.write(f"=== Negotiation Run Summary ===\n")
             f.write(f"Timestamp: {timestamp}\n")
             f.write(f"Run ID: {run_id}\n")

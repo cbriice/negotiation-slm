@@ -12,6 +12,7 @@ import time
 import re
 from dataclasses import dataclass
 import gc
+import unicodedata
 
 from utils.logger_config import get_logger
 from utils.exceptions import (
@@ -381,6 +382,44 @@ class LLMInterface:
 
         return False
 
+    def _normalize_unicode(self, text: str) -> str:
+        """
+        Normalize Unicode characters to ASCII equivalents.
+
+        Converts smart quotes, curly apostrophes, em dashes, etc. to ASCII.
+
+        Args:
+            text: Text containing Unicode characters
+
+        Returns:
+            Text with normalized ASCII characters
+        """
+        # Replace common Unicode punctuation with ASCII equivalents
+        replacements = {
+            '\u2018': "'",  # Left single quotation mark
+            '\u2019': "'",  # Right single quotation mark
+            '\u201C': '"',  # Left double quotation mark
+            '\u201D': '"',  # Right double quotation mark
+            '\u2013': '-',  # En dash
+            '\u2014': '--', # Em dash
+            '\u2026': '...', # Horizontal ellipsis
+            '\u00A0': ' ',  # Non-breaking space
+            '\u2022': '*',  # Bullet
+            '\u00B7': '-',  # Middle dot
+            '\u2032': "'",  # Prime (minutes, feet)
+            '\u2033': '"',  # Double prime (seconds, inches)
+        }
+
+        for unicode_char, ascii_char in replacements.items():
+            text = text.replace(unicode_char, ascii_char)
+
+        # Use unicodedata to normalize remaining characters
+        # NFKD decomposes characters, then we encode to ASCII ignoring errors
+        text = unicodedata.normalize('NFKD', text)
+        text = text.encode('ascii', 'ignore').decode('ascii')
+
+        return text
+
     def _clean_response(self, text: str) -> str:
         """
         Clean up generated response text.
@@ -420,6 +459,9 @@ class LLMInterface:
             sentences = text.split('.')
             if len(sentences) > 1:
                 text = '.'.join(sentences[:-1]) + '.'
+
+        # Normalize Unicode characters to ASCII
+        text = self._normalize_unicode(text)
 
         return text
 
