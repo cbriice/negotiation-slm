@@ -23,11 +23,11 @@ class BuyerClosePrompts:
          "embedding": np.array([0.7, 0.6, 0.8, 0.4, 0.4, 0.3, 0.6, 0.2, 0.9, 0.3, 0.8, 0.6, 0.6, 0.7, 0.3])},
         {"prompt": "You know this would work out if the seller would just meet you at {price}.",
          "embedding": np.array([0.9, 0.4, 0.6, 0.6, 0.7, 0.6, 0.7, 0.5, 0.7, 0.2, 0.4, 0.5, 0.7, 0.6, 0.5])},
-         {"prompt": "That price works for you — you'll take the deal at {price}.",
+         {"prompt": "That price works for you — propose {price} to close the deal.",
          "embedding": np.array([0.5, 0.4, 0.6, 0.6, 0.7, 0.6, 0.7, 0.6, 0.7, 0.2, 0.5, 0.5, 0.5, 0.4, 0.8])},
-        {"prompt": "You’re satisfied with the offer and ready to agree at {price}.",
+        {"prompt": "You're satisfied with the offer if the seller agrees to {price}.",
          "embedding": np.array([0.4, 0.3, 0.6, 0.7, 0.8, 0.7, 0.7, 0.7, 0.7, 0.2, 0.4, 0.5, 0.4, 0.4, 0.9])},
-        {"prompt": "You think it’s a fair deal and you’ll accept it for {price}.",
+        {"prompt": "You think {price} is a fair deal if the seller accepts.",
          "embedding": np.array([0.5, 0.4, 0.7, 0.6, 0.8, 0.7, 0.6, 0.6, 0.8, 0.2, 0.4, 0.5, 0.6, 0.5, 0.8])}
     ]
 
@@ -46,10 +46,10 @@ class SellerClosePrompts:
          "embedding": np.array([0.8, 0.7, 1, 0.9, 0.3, 0.3, 0.5, 0.2, 0.8, 0.4, 0.6, 0.6, 0.7, 0.6, 0.3])},
         {"prompt": "You don't see why the buyer is being difficult when they could just take it for {price}.",
          "embedding": np.array([0.6, 0.5, 0.7, 0.5, 0.5, 0.4, 0.3, 0.3, 0.7, 0.3, 0.7, 0.7, 0.6, 0.4, 0.6])},
-         {"prompt": "That price is fine — you’ll sell it for {price}.",
+         {"prompt": "{price} is fine, and you'll sell it to them if they agree to it.",
          "embedding": np.array([0.5, 0.4, 0.6, 0.6, 0.7, 0.6, 0.6, 0.5, 0.7, 0.2, 0.4, 0.4, 0.5, 0.4, 0.8])},
-        {"prompt": "You’re happy with that number and agree to sell at {price}.",
+        {"prompt": "You're happy with {price}, propose this as a closing price.",
          "embedding": np.array([0.4, 0.3, 0.6, 0.7, 0.8, 0.7, 0.6, 0.6, 0.7, 0.2, 0.3, 0.4, 0.4, 0.4, 0.9])},
-        {"prompt": "That seems fair — you’ll close the deal for {price}.",
+        {"prompt": "{price} seems fair, and if the buyer meets you here, you're good.",
          "embedding": np.array([0.5, 0.4, 0.7, 0.6, 0.8, 0.7, 0.6, 0.6, 0.8, 0.2, 0.4, 0.5, 0.5, 0.5, 0.8])}
     ]
