@@ -41,13 +41,29 @@ class NegotiationState:
     r: int  # Current turn index (0-based)
     Ps: float  # Seller minimum acceptable price
     Pb: float  # Buyer maximum acceptable price
-    P_k: float  # Current proposed price at turn k
+    # Separate price tracking for each party
+    buyer_offer: float  # Current price offered by buyer
+    seller_offer: float  # Current price offered by seller
     n_b_k: int = 0  # Number of extra items for buyer
     n_s_k: int = 0  # Number of extra items for seller
     l_k: int = 0  # Number of extra items included in current offer
 
     # For tracking completion progress
     prev_s: Optional[float] = None  # Previous completion percentage
+
+    @property
+    def P_k(self) -> float:
+        """Midpoint price for backward compatibility."""
+        return (self.buyer_offer + self.seller_offer) / 2
+
+    @property
+    def price_gap(self) -> float:
+        """Current gap between buyer and seller offers."""
+        return abs(self.seller_offer - self.buyer_offer)
+
+    def get_active_price_for(self, is_buyer: bool) -> float:
+        """Get the current price for a specific party."""
+        return self.buyer_offer if is_buyer else self.seller_offer
 
 
 class ControlFunction:
@@ -68,10 +84,12 @@ class ControlFunction:
         # Price gap
         delta_P = abs(P_s - P_b)
 
-        # Seller and buyer margins
+        # Seller and buyer margins using party-specific offers
         if delta_P > self.params.EPSILON:
-            mstar_s = max(0, state.P_k - P_s)
-            mstar_b = max(0, P_b - state.P_k)
+            # Seller's margin based on buyer's offer to them
+            mstar_s = max(0, state.buyer_offer - P_s)
+            # Buyer's margin based on seller's offer to them
+            mstar_b = max(0, P_b - state.seller_offer)
             m_s = 2 * mstar_s / delta_P
             m_b = 2 * mstar_b / delta_P
         else:
@@ -96,9 +114,11 @@ class ControlFunction:
         g_s = max(0, base_values['m_s'])
         g_b = max(0, base_values['m_b'])
 
-        # Price range indicators using lambda normalization
-        delta_Ps = max(0, state.Ps - state.P_k)
-        delta_Pb = max(0, state.P_k - state.Pb)
+        # Price range indicators using lambda normalization with party-specific offers
+        # Seller's distance from minimum (using seller's current offer)
+        delta_Ps = max(0, state.Ps - state.seller_offer)
+        # Buyer's distance from maximum (using buyer's current offer)
+        delta_Pb = max(0, state.buyer_offer - state.Pb)
         lambda_val = max(delta_Ps, delta_Pb)
 
         if lambda_val > 0:

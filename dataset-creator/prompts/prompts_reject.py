@@ -13,7 +13,7 @@ class BuyerRejectPrompts:
     prompts = [
         {"prompt": "You're no longer interested in negotiating this deal, but there's no hard feelings.",
          "embedding": np.array([0.5, 0.4, 0.7, 0.5, 0.6, 0.5, 0.7, 0.6, 0.7, 0.2, 0.4, 0.3, 0.4, 0.5, 0.9])},
-        {"prompt": "The seller is stupid for not taking your offer, and you're no longer interested in negotiation.",
+        {"prompt": "They're stupid for not taking your offer, and you're no longer interested in negotiation.",
          "embedding": np.array([0.8, 0.9, 0.8, 0.3, 0.1, 0.1, 0.2, 0.1, 0.3, 0.4, 0.7, 0.5, 0.3, 0.3, 0.2])},
         {"prompt": "You're very sorry, but you can't continue negotiating the deal.",
          "embedding": np.array([0.2, 0.1, 0.3, 0.4, 0.8, 0.7, 0.6, 0.9, 0.5, 0.2, 0.2, 0.2, 0.3, 0.4, 0.6])},

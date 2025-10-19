@@ -58,7 +58,8 @@ def get_unified_prompt(negotiation_packet: dict, state: NegotiationState, action
         Seller min price: ${seed.seller_min}.
         Potential extras: {seed.extras_available}.
 
-        Current proposed price: {state.P_k}
+        Current BUYER offer: ${state.buyer_offer}
+        Current SELLER price: ${state.seller_offer}
 
         CONVERSATION HISTORY:
         {history_string}

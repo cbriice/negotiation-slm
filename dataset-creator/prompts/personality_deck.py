@@ -43,7 +43,7 @@ class PersonalityTraits:
         self.zeta = self.patience
         self.c = sqrt(self.cooperativeness * self.flexibility)
         self.eta = round(sqrt(self.assertiveness * self.dominance * self.risk_tol), 3)
-        self.p = float(np.mean([1 - self.confidence_self, self.cooperativeness, self.flexibility, 1 - self.persistence]))
+        self.p = round(float(np.mean([1 - self.confidence_self, self.cooperativeness, self.flexibility, 1 - self.persistence])), 3)
 
 # -------------------------- Personalities -------------------------------
 class StraightToPoint():

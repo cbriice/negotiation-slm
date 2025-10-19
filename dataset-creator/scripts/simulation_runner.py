@@ -230,12 +230,13 @@ class SimulationRunner:
             self.control_params.beta_s = seller_personality.traits.beta
             self.logger.sim_logger.debug(f"[{sim_id}] Control params - beta_b: {self.control_params.beta_b}, beta_s: {self.control_params.beta_s}")
 
-            # Initialize negotiation state
+            # Initialize negotiation state with separate buyer/seller prices
             state = NegotiationState(
                 r=0,  # Turn index
                 Ps=seed.seller_min,
                 Pb=seed.buyer_max,
-                P_k=seed.seller_list,  # Current price starts at list price
+                buyer_offer=0.0,  # Buyer hasn't made an offer yet
+                seller_offer=seed.seller_list,  # Seller starts at list price
                 n_b_k=0,  # Extra items for buyer (to be determined from seed)
                 n_s_k=len(seed.extras_available) if seed.extras_available else 0,
                 l_k=0  # Number of extras included
@@ -335,7 +336,7 @@ class SimulationRunner:
                 price_state.buyer_price = initial_offer
                 price_state.initial_buyer_price = initial_offer
                 price_state.current_price = initial_offer
-                state.P_k = initial_offer
+                state.buyer_offer = initial_offer  # Update buyer's offer
                 self.logger.sim_logger.info(f"[{sim_id}] Turn {turn}: Initial buyer offer - ${initial_offer}")
 
                 # Get price adjust prompt for initial offer
@@ -359,7 +360,7 @@ class SimulationRunner:
                         "accept",
                         buyer_personality if is_buyer_turn else seller_personality,
                         is_buyer_turn,
-                        price=state.P_k
+                        price=state.get_active_price_for(not is_buyer_turn)  # Accept other party's price
                     )
                     self.logger.sim_logger.info(f"[{sim_id}] Turn {turn}: Forced response - ACCEPT")
                     forced_response = None
@@ -370,7 +371,7 @@ class SimulationRunner:
                         "reject",
                         buyer_personality if is_buyer_turn else seller_personality,
                         is_buyer_turn,
-                        price=state.P_k
+                        price=state.get_active_price_for(not is_buyer_turn)  # Reject other party's price
                     )
                     self.logger.sim_logger.info(f"[{sim_id}] Turn {turn}: Forced response - REJECT")
                     forced_response = None
@@ -468,46 +469,69 @@ class SimulationRunner:
                     is_buyer_turn
                 )
                 if was_conceded:
-                    self.logger.sim_logger.info(f"[{sim_id}] Price adjustment - {speaker} moved from ${state.P_k:.2f} to ${new_price:.2f}")
+                    # Get current price for this party
+                    old_price = state.get_active_price_for(is_buyer_turn)
+                    self.logger.sim_logger.info(f"[{sim_id}] Price adjustment - {speaker} moved from ${old_price:.2f} to ${new_price:.2f}")
                     price_state = self.price_dynamics.update_state_with_new_price(
                         price_state, new_price, is_buyer_turn
                     )
-                    state.P_k = new_price
+                    # Update the appropriate party's offer
+                    if is_buyer_turn:
+                        state.buyer_offer = new_price
+                    else:
+                        state.seller_offer = new_price
                 else:
-                    self.logger.sim_logger.debug(f"[{sim_id}] Price adjustment - {speaker} held at ${state.P_k:.2f}")
+                    current_price = state.get_active_price_for(is_buyer_turn)
+                    self.logger.sim_logger.debug(f"[{sim_id}] Price adjustment - {speaker} held at ${current_price:.2f}")
 
             elif action == "accept":
-                # Deal accepted
-                self.logger.sim_logger.info(f"[{sim_id}] DEAL ACCEPTED at price: ${state.P_k}")
-                print(f"Deal accepted at price: ${state.P_k}")
+                # Deal accepted - accepting the other party's offer
+                accepted_price = state.get_active_price_for(not is_buyer_turn)
+                self.logger.sim_logger.info(f"[{sim_id}] DEAL ACCEPTED - {speaker} accepts ${accepted_price:.2f}")
+                print(f"Deal accepted at price: ${accepted_price:.2f}")
                 packet["outcome"] = "deal"
                 packet["deal_closed"] = True
-                packet["final_price"] = state.P_k
+                packet["final_price"] = accepted_price
 
                 # Determine who got favorable deal
                 midpoint = (seed.buyer_max + seed.seller_min) / 2
-                packet["buyer_favorable"] = state.P_k < midpoint
-                packet["seller_favorable"] = state.P_k > midpoint
+                packet["buyer_favorable"] = accepted_price < midpoint
+                packet["seller_favorable"] = accepted_price > midpoint
 
                 self.logger.sim_logger.info(f"[{sim_id}] Deal analysis - midpoint: ${midpoint:.2f}, buyer_favorable: {packet['buyer_favorable']}, seller_favorable: {packet['seller_favorable']}")
                 break
 
-            # Check for convergence
-            if turn > 5:  # After some initial turns
-                price_gap = self.price_dynamics.calculate_price_gap(price_state)
-                if price_gap < 0.01 * seed.seller_list:  # Less than 1% of list price
-                    self.logger.sim_logger.info(f"[{sim_id}] Prices CONVERGED (gap: ${price_gap:.2f} < 1% of ${seed.seller_list}). Deal at ${state.P_k}")
-                    print(f"Prices converged. Deal at ${state.P_k}")
+            # Check for convergence (only if deal not already closed)
+            if turn > 5 and not packet.get("deal_closed", False):  # After some initial turns
+                # Check for price overlap (automatic deal convergence)
+                if state.buyer_offer >= state.seller_offer:
+                    # Prices have crossed - deal zone reached
+                    # Use seller's offer (lower price) as that's what buyer would accept
+                    final_price = state.seller_offer
+                    self.logger.sim_logger.info(f"[{sim_id}] Prices OVERLAPPED - Buyer: ${state.buyer_offer:.2f} >= Seller: ${state.seller_offer:.2f}. Deal at seller's price: ${final_price:.2f}")
+                    print(f"Prices overlapped. Deal at ${final_price:.2f}")
                     packet["outcome"] = "deal"
                     packet["deal_closed"] = True
-                    packet["final_price"] = state.P_k
+                    packet["final_price"] = final_price
 
                     midpoint = (seed.buyer_max + seed.seller_min) / 2
-                    packet["buyer_favorable"] = state.P_k < midpoint
-                    packet["seller_favorable"] = state.P_k > midpoint
+                    packet["buyer_favorable"] = final_price < midpoint
+                    packet["seller_favorable"] = final_price > midpoint
+                    break
+                elif state.price_gap < 0.01 * seed.seller_list:  # Gap less than 1% of list price
+                    final_price = state.P_k  # Use midpoint
+                    self.logger.sim_logger.info(f"[{sim_id}] Prices CONVERGED (gap: ${state.price_gap:.2f} < 1% of ${seed.seller_list}). Deal at midpoint: ${final_price:.2f}")
+                    print(f"Prices converged. Deal at ${final_price:.2f}")
+                    packet["outcome"] = "deal"
+                    packet["deal_closed"] = True
+                    packet["final_price"] = final_price
+
+                    midpoint = (seed.buyer_max + seed.seller_min) / 2
+                    packet["buyer_favorable"] = final_price < midpoint
+                    packet["seller_favorable"] = final_price > midpoint
                     break
                 else:
-                    self.logger.sim_logger.debug(f"[{sim_id}] Price gap: ${price_gap:.2f} (${price_state.buyer_price:.2f} - ${price_state.seller_price:.2f})")
+                    self.logger.sim_logger.debug(f"[{sim_id}] Price gap: ${state.price_gap:.2f} (Buyer: ${state.buyer_offer:.2f} - Seller: ${state.seller_offer:.2f})")
 
             # Update state for next turn
             state.prev_s = control_features.get('s', 0)
@@ -594,19 +618,19 @@ class SimulationRunner:
                 cg=control_features['cg'],
                 cz=control_features['cz'],
                 is_buyer=is_buyer,
-                current_price=new_price if was_conceded else state.P_k
+                current_price=new_price if was_conceded else state.get_active_price_for(is_buyer)
             )
 
         elif action == "extra":
             # Map "extra" to "extras" for prompt manager
             prompt = self.prompt_manager.get_action_prompt(
-                "extras", personality, is_buyer, price=state.P_k
+                "extras", personality, is_buyer, price=state.get_active_price_for(is_buyer)
             )
 
         else:
             # Get prompt for other actions
             prompt = self.prompt_manager.get_action_prompt(
-                action, personality, is_buyer, price=state.P_k
+                action, personality, is_buyer, price=state.get_active_price_for(is_buyer)
             )
 
         return action, prompt, control_features
