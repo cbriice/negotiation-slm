@@ -34,7 +34,7 @@ class SimulationRunner:
 
     def __init__(self, seed_directory: str = "seeds/",
                  model_name: str = "Qwen/Qwen2.5-14B-Instruct",
-                 max_turns: int = 20,
+                 max_turns: int = 25,
                  seed_category: Optional[str] = None,
                  seed_selection_method: str = "random"):
         """

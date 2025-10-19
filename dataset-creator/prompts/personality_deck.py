@@ -42,7 +42,7 @@ class PersonalityTraits:
     def __post_init__(self):
         self.zeta = self.patience
         self.c = sqrt(self.cooperativeness * self.flexibility)
-        self.eta = sqrt(self.assertiveness * self.dominance * self.risk_tol)
+        self.eta = round(sqrt(self.assertiveness * self.dominance * self.risk_tol), 3)
         self.p = float(np.mean([1 - self.confidence_self, self.cooperativeness, self.flexibility, 1 - self.persistence]))
 
 # -------------------------- Personalities -------------------------------
@@ -435,7 +435,7 @@ class Stubborn():
 import random
 from typing import Optional
 
-class PersonalityDeck:
+class PersonalityDeck():
     """Manages selection of personalities from the deck."""
 
     def __init__(self):
