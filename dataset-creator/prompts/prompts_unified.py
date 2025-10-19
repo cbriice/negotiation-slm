@@ -51,10 +51,10 @@ def get_unified_prompt(negotiation_packet: dict, state: NegotiationState, action
         Context: 
         {context}
 
-        Buyer: {buyer_personality.description}
+        BUYER PERSONALITY: {buyer_personality.description}
         Buyer max price: ${seed.buyer_max}.
 
-        Seller: {seller_personality.description}
+        SELLER PERSONALITY: {seller_personality.description}
         Seller min price: ${seed.seller_min}.
         Potential extras: {seed.extras_available}.
 
@@ -68,7 +68,7 @@ def get_unified_prompt(negotiation_packet: dict, state: NegotiationState, action
         You are the {turn}. PROMPT: {action_prompt}
         
         Generate a response according to the prompt and these critical rules:
-          - Use natural, coherent language and phrasing following the PROMPT, current role and personality description when generating responses. 
+          - Use natural, coherent language and phrasing following the PROMPT, current role and PERSONALITY when generating responses. 
           - Your output must contain only the response spoken by the {turn}. Do NOT include quotes, role labels, or any explanation.
           - If you mention price, use current proposed or price in prompt.
           - Never deviate from the PROMPT or structure. You are generating ONE response at a time.
