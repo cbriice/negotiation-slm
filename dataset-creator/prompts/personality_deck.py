@@ -47,364 +47,388 @@ class PersonalityTraits:
 
 # -------------------------- Personalities -------------------------------
 class StraightToPoint():
-    def __init__(self, traits: PersonalityTraits):
+    def __init__(self):
         self.description = "A straight to the point negotiator. They just want to close the deal quickly and favorably."
 
-        self.traits = traits
-        traits.assertiveness = 0.7
-        traits.dominance = 0.6
-        traits.confidence_self = 0.8
-        traits.confidence_deal = 1
-        traits.cooperativeness = 0.7
-        traits.flexibility = 0.4
-        traits.patience = 0.6
-        traits.empathy = 0.2
-        traits.rationality = 0.7
-        traits.deceptiveness = 0.1
-        traits.risk_tol = 0.2
-        traits.persistence = 0.5
-        traits.opportunism = 0.6
-        traits.strategic = 0.5
-        traits.composure = 0.9
+        self.traits = PersonalityTraits(
+            assertiveness=0.7,
+            dominance=0.6,
+            confidence_self=0.8,
+            confidence_deal=1,
+            cooperativeness=0.7,
+            flexibility=0.4,
+            patience=0.6,
+            empathy=0.2,
+            rationality=0.7,
+            deceptiveness=0.1,
+            risk_tol=0.2,
+            persistence=0.5,
+            opportunism=0.6,
+            strategic=0.5,
+            composure=0.9,
+            beta=0,
+            alpha=0.95,
+            temp=0.5
+        )
 
         self.trait_vector = np.array([
-            traits.assertiveness, traits.dominance, traits.confidence_self, traits.confidence_deal, traits.cooperativeness, traits.flexibility, traits.patience,
-            traits.empathy, traits.rationality, traits.deceptiveness, traits.risk_tol, traits.persistence, traits.opportunism, traits.strategic, traits.composure
+            self.traits.assertiveness, self.traits.dominance, self.traits.confidence_self, self.traits.confidence_deal,
+            self.traits.cooperativeness, self.traits.flexibility, self.traits.patience, self.traits.empathy,
+            self.traits.rationality, self.traits.deceptiveness, self.traits.risk_tol, self.traits.persistence,
+            self.traits.opportunism, self.traits.strategic, self.traits.composure
         ])
-        
-        traits.beta = 0
-        traits.alpha = 0.95
-        traits.temp = 0.5
 
 class Desperate():
-    def __init__(self, traits: PersonalityTraits):
+    def __init__(self):
         self.description = "A desperate negotiator. They'll do almost anything to close the deal."
 
-        self.traits = traits
-        traits.assertiveness = 0.2
-        traits.dominance = 0.1
-        traits.confidence_self = 0.3
-        traits.confidence_deal = 0.3
-        traits.cooperativeness = 1
-        traits.flexibility = 0.8
-        traits.patience = 0.8
-        traits.empathy = 0.6
-        traits.rationality = 0.2
-        traits.deceptiveness = 0.8
-        traits.risk_tol = 0.2
-        traits.persistence = 0.3
-        traits.opportunism = 1
-        traits.strategic = 0.7
-        traits.composure = 0.3
+        self.traits = PersonalityTraits(
+            assertiveness=0.2,
+            dominance=0.1,
+            confidence_self=0.3,
+            confidence_deal=0.3,
+            cooperativeness=1,
+            flexibility=0.8,
+            patience=0.8,
+            empathy=0.6,
+            rationality=0.2,
+            deceptiveness=0.8,
+            risk_tol=0.2,
+            persistence=0.3,
+            opportunism=1,
+            strategic=0.7,
+            composure=0.3,
+            beta=0.3,
+            alpha=1,
+            temp=0.8
+        )
 
         self.trait_vector = np.array([
-            traits.assertiveness, traits.dominance, traits.confidence_self, traits.confidence_deal, traits.cooperativeness, traits.flexibility, traits.patience,
-            traits.empathy, traits.rationality, traits.deceptiveness, traits.risk_tol, traits.persistence, traits.opportunism, traits.strategic, traits.composure
+            self.traits.assertiveness, self.traits.dominance, self.traits.confidence_self, self.traits.confidence_deal,
+            self.traits.cooperativeness, self.traits.flexibility, self.traits.patience, self.traits.empathy,
+            self.traits.rationality, self.traits.deceptiveness, self.traits.risk_tol, self.traits.persistence,
+            self.traits.opportunism, self.traits.strategic, self.traits.composure
         ])
-        
-        traits.beta = 0.3
-        traits.alpha = 1
-        traits.temp = 0.8
 
 class Skeptic():
-    def __init__(self, traits: PersonalityTraits):
+    def __init__(self):
         self.description = "A skeptical negotiator. Not easily convinced to change their mind on the deal."
 
-        self.traits = traits
-        traits.assertiveness = 0.6
-        traits.dominance = 0.6
-        traits.confidence_self = 1
-        traits.confidence_deal = 0.3
-        traits.cooperativeness = 2
-        traits.flexibility = 0.6
-        traits.patience = 0.7
-        traits.empathy = 0.2
-        traits.rationality = 0.9
-        traits.deceptiveness = 0.3
-        traits.risk_tol = 0.4
-        traits.persistence = 0.5
-        traits.opportunism = 0.5
-        traits.strategic = 0.9
-        traits.composure = 0.7
+        self.traits = PersonalityTraits(
+            assertiveness=0.6,
+            dominance=0.6,
+            confidence_self=1,
+            confidence_deal=0.3,
+            cooperativeness=2,
+            flexibility=0.6,
+            patience=0.7,
+            empathy=0.2,
+            rationality=0.9,
+            deceptiveness=0.3,
+            risk_tol=0.4,
+            persistence=0.5,
+            opportunism=0.5,
+            strategic=0.9,
+            composure=0.7,
+            beta=0.1,
+            alpha=0.85,
+            temp=0.6
+        )
 
         self.trait_vector = np.array([
-            traits.assertiveness, traits.dominance, traits.confidence_self, traits.confidence_deal, traits.cooperativeness, traits.flexibility, traits.patience,
-            traits.empathy, traits.rationality, traits.deceptiveness, traits.risk_tol, traits.persistence, traits.opportunism, traits.strategic, traits.composure
+            self.traits.assertiveness, self.traits.dominance, self.traits.confidence_self, self.traits.confidence_deal,
+            self.traits.cooperativeness, self.traits.flexibility, self.traits.patience, self.traits.empathy,
+            self.traits.rationality, self.traits.deceptiveness, self.traits.risk_tol, self.traits.persistence,
+            self.traits.opportunism, self.traits.strategic, self.traits.composure
         ])
-        
-        traits.beta = 0.1
-        traits.alpha = 0.85
-        traits.temp = 0.6
 
 class Bluffer():
-    def __init__(self, traits: PersonalityTraits):
+    def __init__(self):
         self.description = "A bluffing negotiator. You will push strongly for a favorable deal even if it's not super reasonable."
 
-        self.traits = traits
-        traits.assertiveness = 1
-        traits.dominance = 0.8
-        traits.confidence_self = 0.9
-        traits.confidence_deal = 0.2
-        traits.cooperativeness = 0.3
-        traits.flexibility = 0.3
-        traits.patience = 0.5
-        traits.empathy = 0.4
-        traits.rationality = 0.4
-        traits.deceptiveness = 0.9
-        traits.risk_tol = 0.9
-        traits.persistence = 0.8
-        traits.opportunism = 1
-        traits.strategic = 1
-        traits.composure = 0.8
+        self.traits = PersonalityTraits(
+            assertiveness=1,
+            dominance=0.8,
+            confidence_self=0.9,
+            confidence_deal=0.2,
+            cooperativeness=0.3,
+            flexibility=0.3,
+            patience=0.5,
+            empathy=0.4,
+            rationality=0.4,
+            deceptiveness=0.9,
+            risk_tol=0.9,
+            persistence=0.8,
+            opportunism=1,
+            strategic=1,
+            composure=0.8,
+            beta=0.1,
+            alpha=0.5,
+            temp=0.7
+        )
 
         self.trait_vector = np.array([
-            traits.assertiveness, traits.dominance, traits.confidence_self, traits.confidence_deal, traits.cooperativeness, traits.flexibility, traits.patience,
-            traits.empathy, traits.rationality, traits.deceptiveness, traits.risk_tol, traits.persistence, traits.opportunism, traits.strategic, traits.composure
+            self.traits.assertiveness, self.traits.dominance, self.traits.confidence_self, self.traits.confidence_deal,
+            self.traits.cooperativeness, self.traits.flexibility, self.traits.patience, self.traits.empathy,
+            self.traits.rationality, self.traits.deceptiveness, self.traits.risk_tol, self.traits.persistence,
+            self.traits.opportunism, self.traits.strategic, self.traits.composure
         ])
-        
-        traits.beta = 0.1
-        traits.alpha = 0.5
-        traits.temp = 0.7
 
 class Confrontational():
-    def __init__(self, traits: PersonalityTraits):
+    def __init__(self):
         self.description = "A confrontational negotiator. They aggressively push for a good deal using whatever means necessary."
 
-        self.traits = traits
-        traits.assertiveness = 0.9
-        traits.dominance = 1
-        traits.confidence_self = 1
-        traits.confidence_deal = 0.9
-        traits.cooperativeness = 0.3
-        traits.flexibility = 0.2
-        traits.patience = 0.6
-        traits.empathy = 0.1
-        traits.rationality = 0.7
-        traits.deceptiveness = 0.6
-        traits.risk_tol = 0.8
-        traits.persistence = 0.7
-        traits.opportunism = 0.6
-        traits.strategic = 0.6
-        traits.composure = 0.4
+        self.traits = PersonalityTraits(
+            assertiveness=0.9,
+            dominance=1,
+            confidence_self=1,
+            confidence_deal=0.9,
+            cooperativeness=0.3,
+            flexibility=0.2,
+            patience=0.6,
+            empathy=0.1,
+            rationality=0.7,
+            deceptiveness=0.6,
+            risk_tol=0.8,
+            persistence=0.7,
+            opportunism=0.6,
+            strategic=0.6,
+            composure=0.4,
+            beta=0,
+            alpha=0.75,
+            temp=0.6
+        )
 
         self.trait_vector = np.array([
-            traits.assertiveness, traits.dominance, traits.confidence_self, traits.confidence_deal, traits.cooperativeness, traits.flexibility, traits.patience,
-            traits.empathy, traits.rationality, traits.deceptiveness, traits.risk_tol, traits.persistence, traits.opportunism, traits.strategic, traits.composure
+            self.traits.assertiveness, self.traits.dominance, self.traits.confidence_self, self.traits.confidence_deal,
+            self.traits.cooperativeness, self.traits.flexibility, self.traits.patience, self.traits.empathy,
+            self.traits.rationality, self.traits.deceptiveness, self.traits.risk_tol, self.traits.persistence,
+            self.traits.opportunism, self.traits.strategic, self.traits.composure
         ])
-        
-        traits.beta = 0
-        traits.alpha = 0.75
-        traits.temp = 0.6
 
 class Haggler():
-    def __init__(self, traits: PersonalityTraits):
+    def __init__(self):
         self.description = "A haggling negotiator. They don't fold easily and want to get as much from the counterparty as they can."
-        
-        self.traits = traits
-        traits.assertiveness = 0.8
-        traits.dominance = 0.7
-        traits.confidence_self = 0.9
-        traits.confidence_deal = 0.8
-        traits.cooperativeness = 0.3
-        traits.flexibility = 0.2
-        traits.patience = 0.8
-        traits.empathy = 0.3
-        traits.rationality = 0.4
-        traits.deceptiveness = 0.7
-        traits.risk_tol = 0.6
-        traits.persistence = 1
-        traits.opportunism = 0.8
-        traits.strategic = 0.7
-        traits.composure = 0.8
+
+        self.traits = PersonalityTraits(
+            assertiveness=0.8,
+            dominance=0.7,
+            confidence_self=0.9,
+            confidence_deal=0.8,
+            cooperativeness=0.3,
+            flexibility=0.2,
+            patience=0.8,
+            empathy=0.3,
+            rationality=0.4,
+            deceptiveness=0.7,
+            risk_tol=0.6,
+            persistence=1,
+            opportunism=0.8,
+            strategic=0.7,
+            composure=0.8,
+            beta=0.05,
+            alpha=0.75,
+            temp=0.7
+        )
 
         self.trait_vector = np.array([
-            traits.assertiveness, traits.dominance, traits.confidence_self, traits.confidence_deal, traits.cooperativeness, traits.flexibility, traits.patience,
-            traits.empathy, traits.rationality, traits.deceptiveness, traits.risk_tol, traits.persistence, traits.opportunism, traits.strategic, traits.composure
+            self.traits.assertiveness, self.traits.dominance, self.traits.confidence_self, self.traits.confidence_deal,
+            self.traits.cooperativeness, self.traits.flexibility, self.traits.patience, self.traits.empathy,
+            self.traits.rationality, self.traits.deceptiveness, self.traits.risk_tol, self.traits.persistence,
+            self.traits.opportunism, self.traits.strategic, self.traits.composure
         ])
-        
-        traits.beta = 0.05
-        traits.alpha = 0.75
-        traits.temp = 0.7
 
-class WeakEmotional(): 
-    def __init__(self, traits: PersonalityTraits):
+class WeakEmotional():
+    def __init__(self):
         self.description = "A weak and emotional negotiator. They just want to reach a deal, and don't like confrontation."
 
-        self.traits = traits
-        traits.assertiveness = 0.4
-        traits.dominance = 0.3
-        traits.confidence_self = 0.5
-        traits.confidence_deal = 0.6
-        traits.cooperativeness = 0.8
-        traits.flexibility = 0.8
-        traits.patience = 0.7
-        traits.empathy = 1
-        traits.rationality = 0.1
-        traits.deceptiveness = 0.7
-        traits.risk_tol = 0.2
-        traits.persistence = 0.5
-        traits.opportunism = 0.8
-        traits.strategic = 0.2
-        traits.composure = 0.1
+        self.traits = PersonalityTraits(
+            assertiveness=0.4,
+            dominance=0.3,
+            confidence_self=0.5,
+            confidence_deal=0.6,
+            cooperativeness=0.8,
+            flexibility=0.8,
+            patience=0.7,
+            empathy=1,
+            rationality=0.1,
+            deceptiveness=0.7,
+            risk_tol=0.2,
+            persistence=0.5,
+            opportunism=0.8,
+            strategic=0.2,
+            composure=0.1,
+            beta=0.2,
+            alpha=0.8,
+            temp=0.8
+        )
 
         self.trait_vector = np.array([
-            traits.assertiveness, traits.dominance, traits.confidence_self, traits.confidence_deal, traits.cooperativeness, traits.flexibility, traits.patience,
-            traits.empathy, traits.rationality, traits.deceptiveness, traits.risk_tol, traits.persistence, traits.opportunism, traits.strategic, traits.composure
+            self.traits.assertiveness, self.traits.dominance, self.traits.confidence_self, self.traits.confidence_deal,
+            self.traits.cooperativeness, self.traits.flexibility, self.traits.patience, self.traits.empathy,
+            self.traits.rationality, self.traits.deceptiveness, self.traits.risk_tol, self.traits.persistence,
+            self.traits.opportunism, self.traits.strategic, self.traits.composure
         ])
-        
-        traits.beta = 0.2
-        traits.alpha = 0.8
-        traits.temp = 0.8
 
 class Rationalizer():
-    def __init__(self, traits: PersonalityTraits):
+    def __init__(self):
         self.description = "A rational negotiator. Prefer to use reason and logic to win the negotiation and reach a good deal."
 
-        self.traits = traits
-        traits.assertiveness = 0.7
-        traits.dominance = 0.7
-        traits.confidence_self = 0.7
-        traits.confidence_deal = 0.8
-        traits.cooperativeness = 0.6
-        traits.flexibility = 0.5
-        traits.patience = 0.8
-        traits.empathy = 0.2
-        traits.rationality = 1
-        traits.deceptiveness = 0.3
-        traits.risk_tol = 0.5
-        traits.persistence = 0.6
-        traits.opportunism = 0.7
-        traits.strategic = 1
-        traits.composure = 0.9
+        self.traits = PersonalityTraits(
+            assertiveness=0.7,
+            dominance=0.7,
+            confidence_self=0.7,
+            confidence_deal=0.8,
+            cooperativeness=0.6,
+            flexibility=0.5,
+            patience=0.8,
+            empathy=0.2,
+            rationality=1,
+            deceptiveness=0.3,
+            risk_tol=0.5,
+            persistence=0.6,
+            opportunism=0.7,
+            strategic=1,
+            composure=0.9,
+            beta=0,
+            alpha=0.9,
+            temp=0.5
+        )
 
         self.trait_vector = np.array([
-            traits.assertiveness, traits.dominance, traits.confidence_self, traits.confidence_deal, traits.cooperativeness, traits.flexibility, traits.patience,
-            traits.empathy, traits.rationality, traits.deceptiveness, traits.risk_tol, traits.persistence, traits.opportunism, traits.strategic, traits.composure
+            self.traits.assertiveness, self.traits.dominance, self.traits.confidence_self, self.traits.confidence_deal,
+            self.traits.cooperativeness, self.traits.flexibility, self.traits.patience, self.traits.empathy,
+            self.traits.rationality, self.traits.deceptiveness, self.traits.risk_tol, self.traits.persistence,
+            self.traits.opportunism, self.traits.strategic, self.traits.composure
         ])
-        
-        traits.beta = 0
-        traits.alpha = 0.9
-        traits.temp = 0.5
 
 class StoneWall():
-    def __init__(self, traits: PersonalityTraits):
+    def __init__(self):
         self.description = "A stonewall negotiator. They don't even want to hear it from the counterparty - their offer doesn't need much changing."
 
-        self.traits = traits
-        traits.assertiveness = 1
-        traits.dominance = 0.7
-        traits.confidence_self = 0.9
-        traits.confidence_deal = 1
-        traits.cooperativeness = 0.2
-        traits.flexibility = 0.1
-        traits.patience = 0.7
-        traits.empathy = 0.1
-        traits.rationality = 0.8
-        traits.deceptiveness = 0.2
-        traits.risk_tol = 0.7
-        traits.persistence = 0.4
-        traits.opportunism = 0.2
-        traits.strategic = 0.3
-        traits.composure = 1
+        self.traits = PersonalityTraits(
+            assertiveness=1,
+            dominance=0.7,
+            confidence_self=0.9,
+            confidence_deal=1,
+            cooperativeness=0.2,
+            flexibility=0.1,
+            patience=0.7,
+            empathy=0.1,
+            rationality=0.8,
+            deceptiveness=0.2,
+            risk_tol=0.7,
+            persistence=0.4,
+            opportunism=0.2,
+            strategic=0.3,
+            composure=1,
+            beta=0,
+            alpha=0.9,
+            temp=0.4
+        )
 
         self.trait_vector = np.array([
-            traits.assertiveness, traits.dominance, traits.confidence_self, traits.confidence_deal, traits.cooperativeness, traits.flexibility, traits.patience,
-            traits.empathy, traits.rationality, traits.deceptiveness, traits.risk_tol, traits.persistence, traits.opportunism, traits.strategic, traits.composure
+            self.traits.assertiveness, self.traits.dominance, self.traits.confidence_self, self.traits.confidence_deal,
+            self.traits.cooperativeness, self.traits.flexibility, self.traits.patience, self.traits.empathy,
+            self.traits.rationality, self.traits.deceptiveness, self.traits.risk_tol, self.traits.persistence,
+            self.traits.opportunism, self.traits.strategic, self.traits.composure
         ])
-        
-        traits.beta = 0
-        traits.alpha = 0.9
-        traits.temp = 0.4
 
 class Opportunist():
-    def __init__(self, traits: PersonalityTraits):
+    def __init__(self):
         self.description = "An opportunist negotiator. They will jump at a favorable deal as soon as it presents itself."
 
-        self.traits = traits
-        traits.assertiveness = 0.5
-        traits.dominance = 0.4
-        traits.confidence_self = 0.9
-        traits.confidence_deal = 0.6
-        traits.cooperativeness = 0.4
-        traits.flexibility = 0.7
-        traits.patience = 1
-        traits.empathy = 0.5
-        traits.rationality = 0.7
-        traits.deceptiveness = 0.9
-        traits.risk_tol = 0.5
-        traits.persistence = 0.2
-        traits.opportunism = 1
-        traits.strategic = 0.9
-        traits.composure = 0.9
+        self.traits = PersonalityTraits(
+            assertiveness=0.5,
+            dominance=0.4,
+            confidence_self=0.9,
+            confidence_deal=0.6,
+            cooperativeness=0.4,
+            flexibility=0.7,
+            patience=1,
+            empathy=0.5,
+            rationality=0.7,
+            deceptiveness=0.9,
+            risk_tol=0.5,
+            persistence=0.2,
+            opportunism=1,
+            strategic=0.9,
+            composure=0.9,
+            beta=0.05,
+            alpha=0.8,
+            temp=0.7
+        )
 
         self.trait_vector = np.array([
-            traits.assertiveness, traits.dominance, traits.confidence_self, traits.confidence_deal, traits.cooperativeness, traits.flexibility, traits.patience,
-            traits.empathy, traits.rationality, traits.deceptiveness, traits.risk_tol, traits.persistence, traits.opportunism, traits.strategic, traits.composure
+            self.traits.assertiveness, self.traits.dominance, self.traits.confidence_self, self.traits.confidence_deal,
+            self.traits.cooperativeness, self.traits.flexibility, self.traits.patience, self.traits.empathy,
+            self.traits.rationality, self.traits.deceptiveness, self.traits.risk_tol, self.traits.persistence,
+            self.traits.opportunism, self.traits.strategic, self.traits.composure
         ])
-        
-        traits.beta = 0.05
-        traits.alpha = 0.8
-        traits.temp = 0.7
 
 class HighHorse():
-    def __init__(self, traits: PersonalityTraits):
+    def __init__(self):
         self.description = "A high-and-mighty negotiator. They think the counterparty is being ridiculous for even thinking of trying to undermine them."
 
-        self.traits = traits
-        traits.assertiveness = 1
-        traits.dominance = 0.9
-        traits.confidence_self = 1
-        traits.confidence_deal = 0.9
-        traits.cooperativeness = 0.1
-        traits.flexibility = 0.1
-        traits.patience = 0.3
-        traits.empathy = 0.1
-        traits.rationality = 0.2
-        traits.deceptiveness = 0.2
-        traits.risk_tol = 0.8
-        traits.persistence = 0.3
-        traits.opportunism = 0.5
-        traits.strategic = 0.2
-        traits.composure = 0.8
+        self.traits = PersonalityTraits(
+            assertiveness=1,
+            dominance=0.9,
+            confidence_self=1,
+            confidence_deal=0.9,
+            cooperativeness=0.1,
+            flexibility=0.1,
+            patience=0.3,
+            empathy=0.1,
+            rationality=0.2,
+            deceptiveness=0.2,
+            risk_tol=0.8,
+            persistence=0.3,
+            opportunism=0.5,
+            strategic=0.2,
+            composure=0.8,
+            beta=0,
+            alpha=0.8,
+            temp=0.6
+        )
 
         self.trait_vector = np.array([
-            traits.assertiveness, traits.dominance, traits.confidence_self, traits.confidence_deal, traits.cooperativeness, traits.flexibility, traits.patience,
-            traits.empathy, traits.rationality, traits.deceptiveness, traits.risk_tol, traits.persistence, traits.opportunism, traits.strategic, traits.composure
+            self.traits.assertiveness, self.traits.dominance, self.traits.confidence_self, self.traits.confidence_deal,
+            self.traits.cooperativeness, self.traits.flexibility, self.traits.patience, self.traits.empathy,
+            self.traits.rationality, self.traits.deceptiveness, self.traits.risk_tol, self.traits.persistence,
+            self.traits.opportunism, self.traits.strategic, self.traits.composure
         ])
-        
-        traits.beta = 0
-        traits.alpha = 0.8
-        traits.temp = 0.6
 
 class Stubborn():
-    def __init__(self, traits: PersonalityTraits):
+    def __init__(self):
         self.description = "A stubborn negotiator. They hate to change the terms of the deal from how they started and need a lot of convincing."
 
-        self.traits = traits
-        traits.assertiveness = 1
-        traits.dominance = 0.6
-        traits.confidence_self = 1
-        traits.confidence_deal = 1
-        traits.cooperativeness = 0.2
-        traits.flexibility = 0.1
-        traits.patience = 0.8
-        traits.empathy = 0.3
-        traits.rationality = 0.3
-        traits.deceptiveness = 0.2
-        traits.risk_tol = 0.6
-        traits.persistence = 0.9
-        traits.opportunism = 0.5
-        traits.strategic = 0.5
-        traits.composure = 0.7
+        self.traits = PersonalityTraits(
+            assertiveness=1,
+            dominance=0.6,
+            confidence_self=1,
+            confidence_deal=1,
+            cooperativeness=0.2,
+            flexibility=0.1,
+            patience=0.8,
+            empathy=0.3,
+            rationality=0.3,
+            deceptiveness=0.2,
+            risk_tol=0.6,
+            persistence=0.9,
+            opportunism=0.5,
+            strategic=0.5,
+            composure=0.7,
+            beta=0,
+            alpha=0.85,
+            temp=0.5
+        )
 
         self.trait_vector = np.array([
-            traits.assertiveness, traits.dominance, traits.confidence_self, traits.confidence_deal, traits.cooperativeness, traits.flexibility, traits.patience,
-            traits.empathy, traits.rationality, traits.deceptiveness, traits.risk_tol, traits.persistence, traits.opportunism, traits.strategic, traits.composure
+            self.traits.assertiveness, self.traits.dominance, self.traits.confidence_self, self.traits.confidence_deal,
+            self.traits.cooperativeness, self.traits.flexibility, self.traits.patience, self.traits.empathy,
+            self.traits.rationality, self.traits.deceptiveness, self.traits.risk_tol, self.traits.persistence,
+            self.traits.opportunism, self.traits.strategic, self.traits.composure
         ])
-        
-        traits.beta = 0
-        traits.alpha = 0.85
-        traits.temp = 0.5
 
 
 # -------------------------- Personality Deck Selector -------------------------------
@@ -416,30 +440,20 @@ class PersonalityDeck:
 
     def __init__(self):
         """Initialize the personality deck with all available personalities."""
-        # Create factory functions - each personality will set its own trait values
-        # We pass dummy values since each personality class overwrites them
-        def create_traits():
-            return PersonalityTraits(
-                assertiveness=0.5, dominance=0.5, confidence_self=0.5,
-                confidence_deal=0.5, cooperativeness=0.5, flexibility=0.5,
-                patience=0.5, empathy=0.5, rationality=0.5, deceptiveness=0.5,
-                risk_tol=0.5, persistence=0.5, opportunism=0.5, strategic=0.5,
-                composure=0.5, beta=0.1, alpha=0.8, temp=0.6
-            )
-
+        # Now each personality class creates its own PersonalityTraits with correct values
         self.personalities = [
-            lambda: StraightToPoint(create_traits()),
-            lambda: Desperate(create_traits()),
-            lambda: Skeptic(create_traits()),
-            lambda: Bluffer(create_traits()),
-            lambda: Confrontational(create_traits()),
-            lambda: Haggler(create_traits()),
-            lambda: WeakEmotional(create_traits()),
-            lambda: Rationalizer(create_traits()),
-            lambda: StoneWall(create_traits()),
-            lambda: Opportunist(create_traits()),
-            lambda: HighHorse(create_traits()),
-            lambda: Stubborn(create_traits())
+            lambda: StraightToPoint(),
+            lambda: Desperate(),
+            lambda: Skeptic(),
+            lambda: Bluffer(),
+            lambda: Confrontational(),
+            lambda: Haggler(),
+            lambda: WeakEmotional(),
+            lambda: Rationalizer(),
+            lambda: StoneWall(),
+            lambda: Opportunist(),
+            lambda: HighHorse(),
+            lambda: Stubborn()
         ]
 
         self.personality_names = [
