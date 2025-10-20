@@ -9,7 +9,6 @@ and forced responses according to negotiation flow.
 import numpy as np
 from typing import Dict, List, Optional, Set, Tuple
 from dataclasses import dataclass
-import random
 
 from prompts.prompts_price_adjust import BuyerPriceAdjustmentPrompts, SellerPriceAdjustmentPrompts
 from prompts.prompts_extras import BuyerExtrasPrompts, SellerExtrasPrompts
@@ -108,13 +107,17 @@ class PromptManager:
             prompts_obj = SellerClosePrompts()
         return PromptPool(prompts_obj.prompts, set())
 
-    def _load_accept_prompts(self, is_buyer: bool) -> PromptPool:
-        """Load acceptance prompts."""
+    def _load_accept_prompts(self, is_buyer: bool) -> Dict[str, PromptPool]:
+        """Load acceptance prompts (favorable and unfavorable)."""
         if is_buyer:
             prompts_obj = BuyerAcceptPrompts()
         else:
             prompts_obj = SellerAcceptPrompts()
-        return PromptPool(prompts_obj.prompts, set())
+
+        return {
+            "favorable": PromptPool(prompts_obj.prompts, set()),
+            "unfavorable": PromptPool(prompts_obj.ufa_prompts, set())
+        }
 
     def _load_reject_prompts(self, is_buyer: bool) -> PromptPool:
         """Load rejection prompts."""
@@ -224,7 +227,7 @@ class PromptManager:
             return prompt.format(price=current_price)
 
         # Fallback to any available price prompt
-        for pool_name, pool in prompts_dict.items():
+        for _, pool in prompts_dict.items():
             result = self.select_prompt_by_similarity(
                 pool.prompts,
                 personality.trait_vector,
@@ -248,6 +251,10 @@ class PromptManager:
             personality: Personality object with trait_vector
             is_buyer: Whether this is for buyer or seller
             **kwargs: Additional parameters for specific actions
+                - price: Current price for the action
+                - accept_price: Price being accepted (for accept action)
+                - buyer_max: Buyer's maximum price (for accept favorability)
+                - seller_min: Seller's minimum price (for accept favorability)
 
         Returns:
             Selected prompt string
@@ -266,19 +273,43 @@ class PromptManager:
                 kwargs.get("price", 0)
             )
 
-        # Get prompt pool for action
-        prompt_pool = prompts_dict.get(action)
-        if not prompt_pool:
-            return f"Perform {action} action"
+        # Special handling for accept action - determine favorable vs unfavorable
+        if action == "accept":
+            prompt_pool = prompts_dict.get(action)
+            if isinstance(prompt_pool, dict):
+                # Determine if the accept is favorable or unfavorable
+                accept_price = kwargs.get("accept_price", kwargs.get("price", 0))
 
-        # Handle dictionary of pools (like price_adjust subcategories)
-        if isinstance(prompt_pool, dict):
-            # For other actions that might have subcategories
-            all_prompts = []
-            for pool in prompt_pool.values():
-                all_prompts.extend(pool.prompts)
+                if is_buyer:
+                    # For buyer: favorable if price < buyer_max, unfavorable if price >= buyer_max
+                    buyer_max = kwargs.get("buyer_max", float('inf'))
+                    pool_key = "favorable" if accept_price < buyer_max else "unfavorable"
+                else:
+                    # For seller: favorable if price > seller_min, unfavorable if price <= seller_min
+                    seller_min = kwargs.get("seller_min", 0)
+                    pool_key = "favorable" if accept_price > seller_min else "unfavorable"
+
+                # Get the appropriate pool
+                selected_pool = prompt_pool[pool_key]
+                all_prompts = selected_pool.prompts
+            else:
+                # Fallback if not properly structured - should not happen given our initialization
+                all_prompts = []
+                print(f'[ERROR] problem initializing prompt pool for accept action, prompt_pool is type {type(prompt_pool)}. utils/prompt_manager.py:get_action_prompt()')
         else:
-            all_prompts = prompt_pool.prompts
+            # Get prompt pool for action
+            prompt_pool = prompts_dict.get(action)
+            if not prompt_pool:
+                return f"Perform {action} action"
+
+            # Handle dictionary of pools (like price_adjust subcategories)
+            if isinstance(prompt_pool, dict):
+                # For other actions that might have subcategories
+                all_prompts = []
+                for pool in prompt_pool.values():
+                    all_prompts.extend(pool.prompts)
+            else:
+                all_prompts = prompt_pool.prompts
 
         # Select best prompt by similarity
         result = self.select_prompt_by_similarity(

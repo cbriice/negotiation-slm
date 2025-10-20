@@ -356,11 +356,14 @@ class SimulationRunner:
                 # Check for forced responses
                 if forced_response == "accept":
                     action = "accept"
+                    accept_price = state.get_active_price_for(not is_buyer_turn)  # Accept other party's price
                     prompt = self.prompt_manager.get_action_prompt(
                         "accept",
                         buyer_personality if is_buyer_turn else seller_personality,
                         is_buyer_turn,
-                        price=state.get_active_price_for(not is_buyer_turn)  # Accept other party's price
+                        accept_price=accept_price,
+                        buyer_max=seed.buyer_max,
+                        seller_min=seed.seller_min
                     )
                     self.logger.sim_logger.info(f"[{sim_id}] Turn {turn}: Forced response - ACCEPT")
                     forced_response = None
@@ -625,6 +628,17 @@ class SimulationRunner:
             # Map "extra" to "extras" for prompt manager
             prompt = self.prompt_manager.get_action_prompt(
                 "extras", personality, is_buyer, price=state.get_active_price_for(is_buyer)
+            )
+
+        elif action == "accept":
+            # Special handling for accept to determine favorability
+            seed = packet["seed"]
+            accept_price = state.get_active_price_for(not is_buyer)  # Accepting other party's price
+            prompt = self.prompt_manager.get_action_prompt(
+                "accept", personality, is_buyer,
+                accept_price=accept_price,
+                buyer_max=seed.buyer_max,
+                seller_min=seed.seller_min
             )
 
         else:

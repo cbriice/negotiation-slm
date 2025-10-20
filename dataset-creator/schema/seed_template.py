@@ -28,7 +28,7 @@ context_options = {
     # --- NOTE: randomly sample 1-2 of these MAXIMUM per seed to add variety to dialog themes ---
     "listing_urgency": "",      # high/medium
     "scarcity": "",             # high/medium/low
-    "competing_offer": 000,     # +/- x * seller_list; x in [0.05, 0.3]
+    "competing_offer": 000,     # +/- x * seller_list; x in [0.05, 0.15]
     "risk_of_defect": "",       # high/medium/low
     "returning_customer": "",   # true if used
     "location_match": "",       # far/neutral/close

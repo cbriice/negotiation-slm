@@ -51,7 +51,7 @@ class SellerAcceptPrompts:
     ]
 
     # unfavorable accept
-    prompts = [
+    ufa_prompts = [
         {"prompt": "You need the money soon and are sick of negotiating, so this deal is good enough to accept.",
          "embedding": np.array([0.8, 0.2, 0.4, 0.3, 0.7, 0.8, 0.1, 0.4, 0.6, 0.2, 0.2, 0.2, 0.8, 0.5, 0.5])},
         {"prompt": "Accept their offer begrudgingly - this isn't ideal, but it's the best you'll get.",
