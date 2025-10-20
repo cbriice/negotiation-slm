@@ -71,7 +71,6 @@ class SimulationRunner:
         if specific_seed_file:
             # Load only the specific file
             print(f"\n[SEED LOADER] Loading specific seed file: {specific_seed_file}")
-            print(f"[SEED LOADER] This is the ONLY file that will be used for seeds.\n")
 
             from utils.seed_loader import SeedLoader
             single_loader = SeedLoader(specific_seed_file)
@@ -84,7 +83,7 @@ class SimulationRunner:
             self.seed_loader.all_seeds = single_loader.get_all_seeds()
             self.using_single_file = True
 
-            print(f"[SEED LOADER] Loaded {len(self.seed_loader.all_seeds)} seeds from {specific_seed_file}")
+            # print(f"[SEED LOADER] Loaded {len(self.seed_loader.all_seeds)} seeds from {specific_seed_file}")
             print(f"[SEED LOADER] Category: {category_name}\n")
             self.logger.sim_logger.info(f"Loaded {len(self.seed_loader.all_seeds)} seeds from specific file: {specific_seed_file}")
         else:
@@ -386,7 +385,12 @@ class SimulationRunner:
                 # Check for forced responses
                 if forced_response == "accept":
                     action = "accept"
-                    accept_price = state.get_active_price_for(not is_buyer_turn)  # Accept other party's price
+                    # Use convergence price if available, otherwise accept other party's price
+                    if "convergence_price" in packet:
+                        accept_price = packet["convergence_price"]
+                        self.logger.sim_logger.debug(f"Using convergence price: ${accept_price:.2f}")
+                    else:
+                        accept_price = state.get_active_price_for(not is_buyer_turn)  # Accept other party's price
                     prompt = self.prompt_manager.get_action_prompt(
                         "accept",
                         buyer_personality if is_buyer_turn else seller_personality,
@@ -395,7 +399,7 @@ class SimulationRunner:
                         buyer_max=seed.buyer_max,
                         seller_min=seed.seller_min
                     )
-                    self.logger.sim_logger.info(f"[{sim_id}] Turn {turn}: Forced response - ACCEPT")
+                    self.logger.sim_logger.info(f"[{sim_id}] Turn {turn}: Forced response - ACCEPT at ${accept_price:.2f}")
                     forced_response = None
 
                 elif forced_response == "reject":
@@ -518,9 +522,13 @@ class SimulationRunner:
                     self.logger.sim_logger.debug(f"[{sim_id}] Price adjustment - {speaker} held at ${current_price:.2f}")
 
             elif action == "accept":
-                # Deal accepted - accepting the other party's offer
-                accepted_price = state.get_active_price_for(not is_buyer_turn)
-                self.logger.sim_logger.info(f"[{sim_id}] DEAL ACCEPTED - {speaker} accepts ${accepted_price:.2f}")
+                # Deal accepted - use convergence price if available, otherwise accept other party's offer
+                if "convergence_price" in packet:
+                    accepted_price = packet["convergence_price"]
+                    self.logger.sim_logger.info(f"[{sim_id}] DEAL ACCEPTED (convergence) - {speaker} accepts ${accepted_price:.2f}")
+                else:
+                    accepted_price = state.get_active_price_for(not is_buyer_turn)
+                    self.logger.sim_logger.info(f"[{sim_id}] DEAL ACCEPTED - {speaker} accepts ${accepted_price:.2f}")
                 print(f"Deal accepted at price: ${accepted_price:.2f}")
                 packet["outcome"] = "deal"
                 packet["deal_closed"] = True
@@ -553,17 +561,18 @@ class SimulationRunner:
                     packet["seller_favorable"] = final_price > midpoint
                     break
                 elif state.price_gap < 0.01 * seed.seller_list:  # Gap less than 1% of list price
+                    # Price convergence detected - force an accept response on next turn
                     final_price = state.P_k  # Use midpoint
-                    self.logger.sim_logger.info(f"[{sim_id}] Prices CONVERGED (gap: ${state.price_gap:.2f} < 1% of ${seed.seller_list}). Deal at midpoint: ${final_price:.2f}")
-                    print(f"Prices converged. Deal at ${final_price:.2f}")
-                    packet["outcome"] = "deal"
-                    packet["deal_closed"] = True
-                    packet["final_price"] = final_price
+                    self.logger.sim_logger.info(f"[{sim_id}] Prices CONVERGED (gap: ${state.price_gap:.2f} < 1% of ${seed.seller_list}). Forcing accept on next turn at: ${final_price:.2f}")
+                    print(f"Prices converged. Forcing accept on next turn at ${final_price:.2f}")
 
-                    midpoint = (seed.buyer_max + seed.seller_min) / 2
-                    packet["buyer_favorable"] = final_price < midpoint
-                    packet["seller_favorable"] = final_price > midpoint
-                    break
+                    # Force accept on the next turn with favorable conditions
+                    forced_response = "accept"
+                    accept_price = final_price
+
+                    # Store convergence price in packet for the accept handler to use
+                    packet["convergence_price"] = final_price
+                    self.logger.sim_logger.debug(f"Next turn will be forced ACCEPT at ${accept_price:.2f}")
                 else:
                     self.logger.sim_logger.debug(f"[{sim_id}] Price gap: ${state.price_gap:.2f} (Buyer: ${state.buyer_offer:.2f} - Seller: ${state.seller_offer:.2f})")
 
@@ -1077,7 +1086,7 @@ def main():
 
     if deals_made > 0:
         avg_price = sum(r.get("final_price", 0) for r in results if r.get("deal_closed")) / deals_made
-        print(f"Average final price: ${avg_price:.2f}")
+        # print(f"Average final price: ${avg_price:.2f}")
         logger.sim_logger.info(f"Average final price: ${avg_price:.2f}")
 
     logger.sim_logger.info("="*60)

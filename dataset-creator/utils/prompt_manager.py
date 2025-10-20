@@ -325,6 +325,9 @@ class PromptManager:
             # Format prompt if it has placeholders
             if "price" in kwargs and "{price}" in prompt:
                 return prompt.format(price=kwargs["price"])
+            # Special handling for accept action with accept_price
+            elif action == "accept" and "accept_price" in kwargs and "{price}" in prompt:
+                return prompt.format(price=kwargs["accept_price"])
             return prompt
 
         # Fallback
