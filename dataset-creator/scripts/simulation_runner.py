@@ -534,8 +534,9 @@ class SimulationRunner:
                 self.logger.sim_logger.info(f"[{sim_id}] Deal analysis - midpoint: ${midpoint:.2f}, buyer_favorable: {packet['buyer_favorable']}, seller_favorable: {packet['seller_favorable']}")
                 break
 
-            # Check for convergence (only if deal not already closed)
-            if turn > 5 and not packet.get("deal_closed", False):  # After some initial turns
+            # Check for convergence (only if deal not already closed and no pending forced response)
+            # Skip convergence check if there's a pending forced response to ensure proper dialog flow
+            if turn > 5 and not packet.get("deal_closed", False) and forced_response is None:  # After some initial turns
                 # Check for price overlap (automatic deal convergence)
                 if state.buyer_offer >= state.seller_offer:
                     # Prices have crossed - deal zone reached
@@ -571,10 +572,47 @@ class SimulationRunner:
 
         # If max turns reached without deal
         if packet["outcome"] is None:
-            packet["outcome"] = "no_deal"
-            packet["deal_closed"] = False
-            self.logger.sim_logger.info(f"[{sim_id}] Maximum turns ({self.max_turns}) reached without agreement")
-            print("Maximum turns reached without agreement.")
+            # Check if there's a pending forced accept response
+            if forced_response == "accept":
+                # Generate the final accept response before closing
+                self.logger.sim_logger.info(f"[{sim_id}] Max turns reached with pending ACCEPT - generating final accept response")
+
+                # Determine who's turn it would be
+                is_next_buyer_turn = (len(packet["dialog"]) % 2 == 0)
+                accept_price = state.get_active_price_for(not is_next_buyer_turn)  # Accept other party's price
+
+                # Get the accept prompt
+                accept_prompt = self.prompt_manager.get_action_prompt(
+                    "accept",
+                    buyer_personality if is_next_buyer_turn else seller_personality,
+                    is_next_buyer_turn,
+                    accept_price=accept_price,
+                    buyer_max=seed.buyer_max,
+                    seller_min=seed.seller_min
+                )
+
+                # Generate the accept response
+                accept_response = self._generate_response(packet, state, accept_prompt)
+                speaker = "BUYER" if is_next_buyer_turn else "SELLER"
+                packet["dialog"].append((speaker, accept_response))
+
+                # Mark deal as closed
+                packet["outcome"] = "deal"
+                packet["deal_closed"] = True
+                packet["final_price"] = accept_price
+
+                # Determine who got favorable deal
+                midpoint = (seed.buyer_max + seed.seller_min) / 2
+                packet["buyer_favorable"] = accept_price < midpoint
+                packet["seller_favorable"] = accept_price > midpoint
+
+                self.logger.sim_logger.info(f"[{sim_id}] Deal accepted at price: ${accept_price:.2f} (forced accept at max turns)")
+                print(f"Deal accepted at price: ${accept_price:.2f} (pending accept completed)")
+            else:
+                packet["outcome"] = "no_deal"
+                packet["deal_closed"] = False
+                self.logger.sim_logger.info(f"[{sim_id}] Maximum turns ({self.max_turns}) reached without agreement")
+                print("Maximum turns reached without agreement.")
 
         # Log final outcome
         self.logger.sim_logger.info(f"[{sim_id}] Negotiation complete - outcome: {packet['outcome']}, turns: {len(packet['dialog'])}, final_price: {packet.get('final_price', 'N/A')}")
