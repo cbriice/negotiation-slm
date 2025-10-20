@@ -181,21 +181,27 @@ class MultiFileSeedLoader:
         self.loaders: dict[str, SeedLoader] = {}
         self.all_seeds: List[NegotiationSeed] = []
 
-    def load_all_seeds(self, pattern: str = "*.jsonl") -> None:
+    def load_all_seeds(self, pattern: Optional[str] = None) -> None:
         """
         Load all seed files matching the pattern.
 
         Args:
-            pattern: Glob pattern for seed files (default: *.jsonl)
+            pattern: Glob pattern for seed files (default: loads all .json and .jsonl files)
         """
         if not self.seed_dir.exists():
             raise FileNotFoundError(f"Seed directory not found: {self.seed_dir}")
 
-        seed_files = list(self.seed_dir.glob(pattern))
+        # If no pattern specified, load both .json and .jsonl files
+        if pattern is None:
+            seed_files = list(self.seed_dir.glob("*.json")) + list(self.seed_dir.glob("*.jsonl"))
+        else:
+            seed_files = list(self.seed_dir.glob(pattern))
 
+        print(f"Loading seed files from {self.seed_dir}:")
         for seed_file in seed_files:
-            # Extract category name from filename (e.g., tech_seeds.jsonl -> tech)
+            # Extract category name from filename (e.g., tech_seeds.jsonl -> tech, vehicle_seeds.json -> vehicle)
             category_name = seed_file.stem.replace("_seeds", "")
+            print(f"  - {seed_file.name} -> category: {category_name}")
 
             loader = SeedLoader(seed_file)
             self.loaders[category_name] = loader

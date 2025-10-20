@@ -14,6 +14,7 @@ import sys
 import os
 from datetime import datetime
 import time
+from pathlib import Path
 
 # Add parent directory to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -36,7 +37,8 @@ class SimulationRunner:
                  model_name: str = "Qwen/Qwen2.5-14B-Instruct",
                  max_turns: int = 25,
                  seed_category: Optional[str] = None,
-                 seed_selection_method: str = "random"):
+                 seed_selection_method: str = "random",
+                 specific_seed_file: Optional[str] = None):
         """
         Initialize simulation runner with all required components.
 
@@ -46,6 +48,7 @@ class SimulationRunner:
             max_turns: Maximum number of turns before ending negotiation
             seed_category: Optional category filter for seeds
             seed_selection_method: How to select seeds ("random", "sequential", "all")
+            specific_seed_file: Optional specific seed file to load instead of directory
         """
         # Initialize logger
         self.logger = get_logger()
@@ -57,12 +60,39 @@ class SimulationRunner:
         self.logger.sim_logger.info(f"  - Seed directory: {seed_directory}")
         self.logger.sim_logger.info(f"  - Seed category: {seed_category}")
         self.logger.sim_logger.info(f"  - Seed selection: {seed_selection_method}")
+        if specific_seed_file:
+            self.logger.sim_logger.info(f"  - Specific seed file: {specific_seed_file}")
 
         # Initialize components
         self.logger.sim_logger.info("Loading seeds...")
-        self.seed_loader = MultiFileSeedLoader(seed_directory)
-        self.seed_loader.load_all_seeds()
-        self.logger.sim_logger.info(f"Loaded {len(self.seed_loader.all_seeds)} total seeds")
+
+        # Check if we're loading a specific file or a directory
+        self.using_single_file = False
+        if specific_seed_file:
+            # Load only the specific file
+            print(f"\n[SEED LOADER] Loading specific seed file: {specific_seed_file}")
+            print(f"[SEED LOADER] This is the ONLY file that will be used for seeds.\n")
+
+            from utils.seed_loader import SeedLoader
+            single_loader = SeedLoader(specific_seed_file)
+
+            # Create a MultiFileSeedLoader-compatible structure
+            self.seed_loader = MultiFileSeedLoader(seed_directory)
+            # Manually set up the loader with just this single file
+            category_name = Path(specific_seed_file).stem.replace("_seeds", "")
+            self.seed_loader.loaders[category_name] = single_loader
+            self.seed_loader.all_seeds = single_loader.get_all_seeds()
+            self.using_single_file = True
+
+            print(f"[SEED LOADER] Loaded {len(self.seed_loader.all_seeds)} seeds from {specific_seed_file}")
+            print(f"[SEED LOADER] Category: {category_name}\n")
+            self.logger.sim_logger.info(f"Loaded {len(self.seed_loader.all_seeds)} seeds from specific file: {specific_seed_file}")
+        else:
+            # Load all seeds from directory
+            print(f"\n[SEED LOADER] Loading ALL seed files from directory: {seed_directory}")
+            self.seed_loader = MultiFileSeedLoader(seed_directory)
+            self.seed_loader.load_all_seeds()
+            self.logger.sim_logger.info(f"Loaded {len(self.seed_loader.all_seeds)} total seeds from directory")
 
         # Store configuration
         self.seed_category = seed_category
@@ -932,11 +962,20 @@ def main():
 
     # Handle seed-specific configuration
     seed_directory = args.seed_dir
+    specific_seed_file = None
     if args.seed_file:
-        print(f"Loading specific seed file: {args.seed_file}")
+        # Resolve the seed file path
         if not os.path.dirname(args.seed_file):
-            args.seed_file = os.path.join(args.seed_dir, args.seed_file)
-        seed_directory = args.seed_dir
+            # If just a filename, look in the seed directory
+            specific_seed_file = os.path.join(args.seed_dir, args.seed_file)
+        else:
+            # Full path provided
+            specific_seed_file = args.seed_file
+
+        # Check if file exists
+        if not os.path.exists(specific_seed_file):
+            print(f"Error: Seed file not found: {specific_seed_file}")
+            return
 
     # Create simulation runner
     runner = SimulationRunner(
@@ -944,7 +983,8 @@ def main():
         model_name=args.model,
         max_turns=args.max_turns,
         seed_category=args.seed_category,
-        seed_selection_method=args.seed_selection
+        seed_selection_method=args.seed_selection,
+        specific_seed_file=specific_seed_file
     )
 
     # Handle specific seed selection
@@ -963,7 +1003,10 @@ def main():
     # Run simulations
     print("Starting negotiation simulations...")
     print(f"Configuration:")
-    print(f"  - Seed directory: {seed_directory}")
+    if specific_seed_file:
+        print(f"  - Seed file: {specific_seed_file} (only this file will be used)")
+    else:
+        print(f"  - Seed directory: {seed_directory} (loading ALL seed files)")
     print(f"  - Seed selection: {args.seed_selection}")
     if args.seed_category:
         print(f"  - Category filter: {args.seed_category}")
