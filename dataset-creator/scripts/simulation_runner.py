@@ -1048,6 +1048,7 @@ def main():
             return
 
     # Run simulations
+    start = time.time()
     print("Starting negotiation simulations...")
     print(f"Configuration:")
     if specific_seed_file:
@@ -1071,18 +1072,27 @@ def main():
         output_base=args.output_dir,
         save_structured=not args.no_structured
     )
+    
+    end = time.time()
+    runtime = (end - start) / 60        # in minutes
+    if runtime > 120:
+        runtime = runtime / 60          # in hours
+        runtime_string = f"{runtime} hrs"
+    else:
+        runtime_string = f"{runtime} min"
 
     logger.sim_logger.info("="*60)
     logger.sim_logger.info("SIMULATION COMPLETE")
     logger.sim_logger.info(f"Generated {len(results)} negotiations")
 
     print("\nSimulation complete!")
-    print(f"Generated {len(results)} negotiations")
+    print(f"Generated {len(results)} negotiations in {runtime_string}")
 
     # Print summary statistics
     deals_made = sum(1 for r in results if r.get("deal_closed"))
     print(f"Deals completed: {deals_made}/{len(results)}")
     logger.sim_logger.info(f"Final statistics - Deals: {deals_made}/{len(results)}")
+    print(f"Average time per negotiation: {runtime / len(results)} min")
 
     if deals_made > 0:
         avg_price = sum(r.get("final_price", 0) for r in results if r.get("deal_closed")) / deals_made

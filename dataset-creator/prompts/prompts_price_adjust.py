@@ -66,7 +66,17 @@ class BuyerPriceAdjustmentPrompts:
         {"prompt": "Reiterate your offer of {price} and explain that you have seen the item for less somewhere else, so the seller must meet this price.",
          "embedding": np.array([0.8, 0.6, 0.7, 0.8, 0.5, 0.4, 0.7, 0.4, 0.9, 0.5, 0.7, 0.7, 0.6, 0.8, 0.7])},
         {"prompt": "Tell the seller you'll recommend them to your friends if they give you a better deal at {price}.",
-         "embedding": np.array([0.6, 0.5, 0.5, 0.5, 0.3, 0.4, 0.6, 0.4, 0.5, 0.8, 0.5, 0.6, 0.5, 0.7, 0.7])}
+         "embedding": np.array([0.6, 0.5, 0.5, 0.5, 0.3, 0.4, 0.6, 0.4, 0.5, 0.8, 0.5, 0.6, 0.5, 0.7, 0.7])},
+        {"prompt": "You've already stretched your budget enough - hold firm at {price}.",
+         "embedding": np.array([0.6, 0.6, 0.8, 0.8, 0.3, 0.3, 0.5, 0.3, 0.8, 0.4, 0.6, 0.6, 0.6, 0.7, 0.7])},
+        {"prompt": "You're being serious about {price}, and shouldn't have to go any lower.",
+         "embedding": np.array([0.8, 0.7, 0.9, 0.9, 0.2, 0.2, 0.6, 0.3, 0.7, 0.3, 0.8, 0.7, 0.5, 0.5, 0.8])},
+        {"prompt": "You've done your research and {price} reflects the item's real value.",
+         "embedding": np.array([0.6, 0.5, 0.7, 0.8, 0.5, 0.5, 0.8, 0.5, 1, 0.3, 0.5, 0.6, 0.7, 0.9, 0.8])},
+        {"prompt": "You respect their position, but can only do {price}",
+         "embedding": np.array([0.4, 0.3, 0.6, 0.6, 0.7, 0.6, 0.7, 0.7, 0.6, 0.3, 0.4, 0.6, 0.7, 0.6, 0.6])},
+        {"prompt": "Suggest that {price} is fair for both sides and avoids wasting more time.",
+         "embedding": np.array([0.5, 0.4, 0.6, 0.7, 0.6, 0.5, 0.7, 0.6, 0.8, 0.3, 0.5, 0.7, 0.7, 0.8, 0.7])}
     ]
 
 
@@ -125,5 +135,11 @@ class SellerPriceAdjustmentPrompts:
         {"prompt": "You think the buyer is bargaining based on assumptions, but {price} is reasonable.",
          "embedding": np.array([0.7, 0.5, 0.8, 0.8, 0.3, 0.2, 0.7, 0.2, 0.9, 0.3, 0.5, 0.7, 0.4, 0.8, 0.8])},
         {"prompt": "You're not convinced of the buyer's offer and want to hear their rationalization. You think {price} is good.",
-         "embedding": np.array([0.5, 0.4, 0.6, 0.6, 0.4, 0.4, 0.8, 0.4, 0.8, 0.2, 0.4, 0.6, 0.5, 0.7, 0.8])}
+         "embedding": np.array([0.5, 0.4, 0.6, 0.6, 0.4, 0.4, 0.8, 0.4, 0.8, 0.2, 0.4, 0.6, 0.5, 0.7, 0.8])},
+        {"prompt": "Lowering price below {price} wouldn't make the sale worth it for you, this is as good as they'll get.",
+         "embedding": np.array([0.6, 0.5, 0.7, 0.7, 0.5, 0.5, 0.7, 0.5, 0.8, 0.3, 0.5, 0.6, 0.6, 0.7, 0.7])},
+        {"prompt": "You're already giving them a good deal at {price}, and won't reduce it further.",
+         "embedding": np.array([0.8, 0.7, 0.9, 0.8, 0.2, 0.2, 0.6, 0.3, 0.8, 0.3, 0.8, 0.7, 0.5, 0.7, 0.8])},
+        {"prompt": "You appreciate interest but won't accept less than {price}.",
+         "embedding": np.array([0.8, 0.7, 0.8, 0.8, 0.3, 0.3, 0.6, 0.3, 0.7, 0.3, 0.7, 0.7, 0.5, 0.7, 0.8])}
     ]
