@@ -33,7 +33,7 @@ def get_unified_prompt(negotiation_packet: dict, state: NegotiationState, action
         turn = "SELLER"
 
     seed = negotiation_packet["seed"]   # type NegotiationSeed from schema/seed_initializer.py
-    category = seed["category"]
+    category = seed.category
 
     # get seed context
     seed_context = seed.context
@@ -47,7 +47,7 @@ def get_unified_prompt(negotiation_packet: dict, state: NegotiationState, action
     context = "\n".join(context_info)
 
     # get seed id
-    id = seed["seed_id"]
+    id = seed.seed_id
 
     prompt = get_specific_prompt(seed, state, action_prompt, id, context, turn, history_string, seller_personality, buyer_personality)
 
@@ -59,7 +59,7 @@ def get_specific_prompt(seed, state: NegotiationState, action_prompt: str,
                         id: int, context: str, turn: str, history_string: str, 
                         seller_personality, buyer_personality) -> str:
     
-    category = seed["category"]
+    category = seed.category
     
     if category == "hospitality":     # hospitality specific prompt. extras are amenities, quantity is lease duration
         return f"""
