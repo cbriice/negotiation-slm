@@ -242,6 +242,8 @@ class SimulationRunner:
                 self.logger.sim_logger.warning("No more seeds available!")
                 print("No more seeds available!")
                 break
+            
+            print(f"\nSeed ID: {seed.seed_id}")
 
             buyer_personality, seller_personality = self.personality_deck.select_two_personalities()
             self.logger.log_simulation_start(
@@ -1074,9 +1076,9 @@ def main():
     )
     
     end = time.time()
-    runtime = (end - start) / 60        # in minutes
+    runtime = round((end - start) / 60, 1)        # in minutes
     if runtime > 120:
-        runtime = runtime / 60          # in hours
+        runtime = round(runtime / 60, 1)          # in hours
         runtime_string = f"{runtime} hrs"
     else:
         runtime_string = f"{runtime} min"

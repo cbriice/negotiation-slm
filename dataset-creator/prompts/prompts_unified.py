@@ -95,7 +95,7 @@ def get_specific_prompt(seed, state: NegotiationState, action_prompt: str,
           - If you mention price, use current proposed or price in prompt.
           - Never deviate from the PROMPT or structure. You are generating ONE response at a time.
         <|im_end|>
-        <|im_start|>assistant<|im_end|>
+        <|im_start|>assistant
         """
     
     elif id > 3000 and id < 4000:   # service seeds. person to person tone should have slightly diff context imo. condition field meaningless as well
@@ -133,7 +133,7 @@ def get_specific_prompt(seed, state: NegotiationState, action_prompt: str,
           - If you mention price, use current proposed or price in prompt.
           - Never deviate from the PROMPT or structure. You are generating ONE response at a time.
         <|im_end|>
-        <|im_start|>assistant<|im_end|>
+        <|im_start|>assistant
         """
     
     else:               # return default prompt. for tech, vehicle seeds, other item based seeds
@@ -170,7 +170,7 @@ def get_specific_prompt(seed, state: NegotiationState, action_prompt: str,
           - If you mention price, use current proposed or price in prompt.
           - Never deviate from the PROMPT or structure. You are generating ONE response at a time.
         <|im_end|>
-        <|im_start|>assistant<|im_end|>
+        <|im_start|>assistant
         """
 
 # =============================================================================
