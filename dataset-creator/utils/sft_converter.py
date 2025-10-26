@@ -41,18 +41,18 @@ class SFTConverter:
         """
         # Map personality class names to their tags from personality_deck.py
         self.personality_tags = {
-            "StraightToPoint": "straightforward",
-            "Desperate": "desperation",
-            "Skeptic": "skepticism",
-            "Bluffer": "bluffing",
-            "Confrontational": "confrontation",
-            "Haggler": "haggling",
-            "WeakEmotional": "concession",
-            "Rationalizer": "rationalization",
-            "StoneWall": "non-cooperation",
-            "Opportunist": "opportunism",
-            "HighHorse": "haughtiness",
-            "Stubborn": "stubbornness"
+            "StraightToPoint": StraightToPoint.tag,
+            "Desperate": Desperate.tag,
+            "Skeptic": Skeptic.tag,
+            "Bluffer": Bluffer.tag,
+            "Confrontational": Confrontational.tag,
+            "Haggler": Haggler.tag,
+            "WeakEmotional": WeakEmotional.tag,
+            "Rationalizer": Rationalizer.tag,
+            "StoneWall": StoneWall.tag,
+            "Opportunist": Opportunist.tag,
+            "HighHorse": HighHorse.tag,
+            "Stubborn": Stubborn.tag
         }
 
         # Initialize personality deck for trait access

@@ -28,6 +28,7 @@ from prompts.personality_deck import PersonalityDeck
 from prompts.prompts_unified import get_unified_prompt
 from schema.seed_initializer import NegotiationSeed
 from utils.logger_config import get_logger, setup_logger
+from utils.sft_converter import SFTConverter
 
 
 class SimulationRunner:
@@ -850,6 +851,17 @@ class SimulationRunner:
                 }
                 f.write(json.dumps(dataset_entry, ensure_ascii=False) + '\n')
 
+        # Convert to SFT format automatically
+        self.logger.sim_logger.info("Converting dataset to SFT format...")
+        sft_file = os.path.join(run_dir, f"dataset_{timestamp}_sft.jsonl")
+        converter = SFTConverter(seed_dir="seeds/")
+        packets_written = converter.convert_file(
+            flattened_file,
+            sft_file,
+            include_no_deals=True
+        )
+        self.logger.sim_logger.info(f"Converted to SFT format: {packets_written} packets written")
+
         # Save structured version if requested
         if save_structured:
             structured_file = os.path.join(run_dir, f"negotiations_structured_{timestamp}.json")
@@ -927,6 +939,7 @@ class SimulationRunner:
 
         # Log saved files
         self.logger.sim_logger.info(f"Saved flattened dataset to {flattened_file}")
+        self.logger.sim_logger.info(f"Saved SFT dataset to {sft_file}")
         if save_structured:
             self.logger.sim_logger.info(f"Saved structured data to negotiations_structured_{timestamp}.json")
         self.logger.sim_logger.info(f"Saved summary to summary_{timestamp}.txt")
@@ -935,6 +948,7 @@ class SimulationRunner:
         print(f"Saved {len(self.completed_negotiations)} negotiations to: {run_dir}")
         print(f"  - Metadata: metadata.json")
         print(f"  - Training dataset: dataset_{timestamp}.jsonl")
+        print(f"  - SFT training dataset: dataset_{timestamp}_sft.jsonl ({packets_written} packets)")
         if save_structured:
             print(f"  - Structured data: negotiations_structured_{timestamp}.json")
         print(f"  - Summary: summary_{timestamp}.txt")
