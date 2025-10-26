@@ -1,4 +1,6 @@
 # SFT packet schema doc
+Per negotiation, two SFT packets will be generated: one making the buyer the assistant, and one vice versa. The side who is the assistant for a given packet is the side which the assistant_style system element is derived from. 
+
 ## field outlines
 "messages" category contains the negotiation dialog loaded from the generated data. list obviously stretches beyond template for full dialog but just showed difference in opening structure for diff sides
 user is opposite side in negotiation, assistant is model side
@@ -11,28 +13,7 @@ user is opposite side in negotiation, assistant is model side
 "meta" category is backend-only, not used as input but for training bookkeeping
 
 ## schema
-If assistant is seller (they have second turn):
-```json
-{
-    "messages": [
-        {"role": "system", "content": "You are an expert negotiator."},
-        {"role": "user", "content": ""},
-        {"role": "assistant", "content": ""}
-    ],
-    "system": {
-        "assistant_style": "",
-        "difficulty": 0.0,
-        "key_strategy": ""
-    },
-    "meta": {
-        "opponent_personality": "",
-        "favorable_outcome": "",
-        "deal_closed": "",
-        "rounds": 0
-    }
-}
-```
-If assistant is buyer (they have first turn):
+If assistant is buyer (they have first turn, if seller then first turn is user and second turn is assistant):
 ```json
 {
     "messages": [
@@ -46,7 +27,7 @@ If assistant is buyer (they have first turn):
         "key_strategy": ""
     },
     "meta": {
-        "opponent_personality": "",
+        "opponent_style": "",
         "favorable_outcome": "",
         "deal_closed": "",
         "rounds": 0

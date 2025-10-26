@@ -49,6 +49,7 @@ class PersonalityTraits:
 class StraightToPoint():
     def __init__(self):
         self.description = "A straight to the point negotiator. They just want to close the deal quickly and favorably."
+        self.tag = "straightforward"
 
         self.traits = PersonalityTraits(
             assertiveness=0.7,
@@ -81,6 +82,7 @@ class StraightToPoint():
 class Desperate():
     def __init__(self):
         self.description = "A desperate negotiator. They'll do almost anything to close the deal."
+        self.tag = "desperation"
 
         self.traits = PersonalityTraits(
             assertiveness=0.2,
@@ -113,6 +115,7 @@ class Desperate():
 class Skeptic():
     def __init__(self):
         self.description = "A skeptical negotiator. Not easily convinced to change their mind on the deal."
+        self.tag = "skepticism"
 
         self.traits = PersonalityTraits(
             assertiveness=0.6,
@@ -145,6 +148,7 @@ class Skeptic():
 class Bluffer():
     def __init__(self):
         self.description = "A bluffing negotiator. You will push strongly for a favorable deal even if it's not super reasonable."
+        self.tag = "bluffing"
 
         self.traits = PersonalityTraits(
             assertiveness=1,
@@ -177,6 +181,7 @@ class Bluffer():
 class Confrontational():
     def __init__(self):
         self.description = "A confrontational negotiator. They aggressively push for a good deal using whatever means necessary."
+        self.tag = "confrontation"
 
         self.traits = PersonalityTraits(
             assertiveness=0.9,
@@ -209,6 +214,7 @@ class Confrontational():
 class Haggler():
     def __init__(self):
         self.description = "A haggling negotiator. They don't fold easily and want to get as much from the counterparty as they can."
+        self.tag = "haggling"
 
         self.traits = PersonalityTraits(
             assertiveness=0.8,
@@ -241,6 +247,7 @@ class Haggler():
 class WeakEmotional():
     def __init__(self):
         self.description = "A weak and emotional negotiator. They just want to reach a deal, and don't like confrontation."
+        self.tag = "concession"
 
         self.traits = PersonalityTraits(
             assertiveness=0.4,
@@ -273,6 +280,7 @@ class WeakEmotional():
 class Rationalizer():
     def __init__(self):
         self.description = "A rational negotiator. Prefer to use reason and logic to win the negotiation and reach a good deal."
+        self.tag = "rationalization"
 
         self.traits = PersonalityTraits(
             assertiveness=0.7,
@@ -305,6 +313,7 @@ class Rationalizer():
 class StoneWall():
     def __init__(self):
         self.description = "A stonewall negotiator. They don't even want to hear it from the counterparty - their offer doesn't need much changing."
+        self.tag = "non-cooperation"
 
         self.traits = PersonalityTraits(
             assertiveness=1,
@@ -337,6 +346,7 @@ class StoneWall():
 class Opportunist():
     def __init__(self):
         self.description = "An opportunist negotiator. They will jump at a favorable deal as soon as it presents itself."
+        self.tag = "opportunism"
 
         self.traits = PersonalityTraits(
             assertiveness=0.5,
@@ -369,6 +379,7 @@ class Opportunist():
 class HighHorse():
     def __init__(self):
         self.description = "A high-and-mighty negotiator. They think the counterparty is being ridiculous for even thinking of trying to undermine them."
+        self.tag = "haughtiness"
 
         self.traits = PersonalityTraits(
             assertiveness=1,
@@ -401,6 +412,7 @@ class HighHorse():
 class Stubborn():
     def __init__(self):
         self.description = "A stubborn negotiator. They hate to change the terms of the deal from how they started and need a lot of convincing."
+        self.tag = "stubbornness"
 
         self.traits = PersonalityTraits(
             assertiveness=1,
@@ -499,8 +511,12 @@ class PersonalityDeck():
             buyer = self.personalities[indices[0]]()
             seller = self.personalities[indices[1]]()
         else:
-            buyer = self.select_personality()
-            seller = self.select_personality()
+            # When avoid_same is False, select the same personality for both
+            selected_personality = self.select_personality()
+            # Create a second instance of the same personality type
+            personality_class = type(selected_personality)
+            buyer = selected_personality
+            seller = personality_class()
 
         return buyer, seller
 
