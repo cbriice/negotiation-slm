@@ -34,3 +34,13 @@ If assistant is buyer (they have first turn, if seller then first turn is user a
     }
 }
 ```
+
+## key_strategy options
+  - anchor
+  - compromise
+  - market_logic
+  - walk_away
+  - friendship_appeal
+  - guilt_trip
+  - problem_solve
+  - 
