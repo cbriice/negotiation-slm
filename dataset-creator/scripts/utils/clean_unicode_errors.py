@@ -6,6 +6,7 @@ Replaces confusing Unicode characters with their ASCII equivalents.
 import sys
 import argparse
 from pathlib import Path
+import re
 
 # Mapping of problematic Unicode characters to their ASCII replacements
 UNICODE_REPLACEMENTS = {
@@ -146,6 +147,20 @@ def clean_file(file_path, output_path=None, backup=True):
     replacement_count = 0
     replacements_made = {}
 
+    # FIRST: Handle inch markers (must be done before general quote replacements)
+    # Pattern matches numbers followed by double quotes (inches)
+    # Includes both ASCII and Unicode double quote variants
+    inch_pattern = r'(\d+(?:\.\d+)?)\s*["\u201c\u201d\u201e\u201f\u2033"]'
+    inch_matches = re.findall(inch_pattern, content)
+    if inch_matches:
+        # Replace inch markers with " inches" to avoid JSON/dict formatting issues
+        content_modified = re.sub(inch_pattern, r'\1 inches', content)
+        inch_replacement_count = len(re.findall(inch_pattern, content))
+        replacement_count += inch_replacement_count
+        replacements_made['inch markers'] = inch_replacement_count
+        content = content_modified
+        print(f"Replaced {inch_replacement_count} inch markers (e.g., 32\" → 32 inches)")
+
     # Replace problematic characters
     for unicode_char, ascii_replacement in UNICODE_REPLACEMENTS.items():
         if unicode_char in content:
@@ -173,12 +188,16 @@ def clean_file(file_path, output_path=None, backup=True):
         if replacements_made:
             print("\nReplacements made:")
             for char, count in sorted(replacements_made.items(), key=lambda x: x[1], reverse=True):
-                char_name = f"U+{ord(char):04X}"
-                replacement = UNICODE_REPLACEMENTS[char]
-                if replacement:
-                    print(f"  {char_name} ({char}) → '{replacement}': {count} occurrences")
+                # Handle inch markers specially
+                if char == 'inch markers':
+                    print(f"  Inch markers (e.g., 32\" → 32 inches): {count} occurrences")
                 else:
-                    print(f"  {char_name} (removed): {count} occurrences")
+                    char_name = f"U+{ord(char):04X}"
+                    replacement = UNICODE_REPLACEMENTS[char]
+                    if replacement:
+                        print(f"  {char_name} ({char}) → '{replacement}': {count} occurrences")
+                    else:
+                        print(f"  {char_name} (removed): {count} occurrences")
     else:
         print(f"No problematic Unicode characters found in {file_path}")
 
@@ -210,12 +229,27 @@ def main():
                     with open(file_path, 'r', encoding='utf-8') as f:
                         content = f.read()
                     found = {}
+
+                    # Check for inch markers
+                    inch_pattern = r'(\d+(?:\.\d+)?)\s*["\u201c\u201d\u201e\u201f\u2033"]'
+                    inch_matches = re.findall(inch_pattern, content)
+                    if inch_matches:
+                        inch_count = len(inch_matches)
+                        found['inch markers'] = inch_count
+
+                    # Check for other Unicode characters
                     for unicode_char, ascii_replacement in UNICODE_REPLACEMENTS.items():
                         if unicode_char in content:
                             found[unicode_char] = content.count(unicode_char)
 
                     if found:
                         print("Would replace:")
+                        # Handle inch markers first if present
+                        if 'inch markers' in found:
+                            print(f"  Inch markers (e.g., 32\" → 32 inches): {found['inch markers']} occurrences")
+                            del found['inch markers']
+
+                        # Handle other replacements
                         for char, count in sorted(found.items(), key=lambda x: x[1], reverse=True):
                             char_name = f"U+{ord(char):04X}"
                             replacement = UNICODE_REPLACEMENTS[char]
