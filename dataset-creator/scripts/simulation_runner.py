@@ -38,7 +38,8 @@ class SimulationRunner:
                  max_turns: int = 25,
                  seed_category: Optional[str] = None,
                  seed_selection_method: str = "random",
-                 specific_seed_file: Optional[str] = None):
+                 specific_seed_file: Optional[str] = None,
+                 same_personality_count: int = 0):
         """
         Initialize simulation runner with all required components.
 
@@ -49,6 +50,7 @@ class SimulationRunner:
             seed_category: Optional category filter for seeds
             seed_selection_method: How to select seeds ("random", "sequential", "all")
             specific_seed_file: Optional specific seed file to load instead of directory
+            same_personality_count: Number of runs to use same personality (0=never, -1=always)
         """
         # Initialize logger
         self.logger = get_logger()
@@ -57,6 +59,9 @@ class SimulationRunner:
         self.logger.sim_logger.info(f"Configuration:")
         self.logger.sim_logger.info(f"  - Model: {model_name}")
         self.logger.sim_logger.info(f"  - Max turns: {max_turns}")
+        if same_personality_count != 0:
+            same_pers_msg = "all runs" if same_personality_count == -1 else f"{same_personality_count} runs"
+            self.logger.sim_logger.info(f"  - Same personality mode: {same_pers_msg}")
         self.logger.sim_logger.info(f"  - Seed directory: {seed_directory}")
         self.logger.sim_logger.info(f"  - Seed category: {seed_category}")
         self.logger.sim_logger.info(f"  - Seed selection: {seed_selection_method}")
@@ -97,6 +102,8 @@ class SimulationRunner:
         self.seed_category = seed_category
         self.seed_selection_method = seed_selection_method
         self.seed_index = 0  # For sequential selection
+        self.same_personality_count = same_personality_count
+        self.same_personality_runs_done = 0  # Track how many same-personality runs completed
 
         # Initialize control function with default params
         self.logger.sim_logger.info("Initializing control function...")
@@ -245,7 +252,25 @@ class SimulationRunner:
             
             print(f"\nSeed ID: {seed.seed_id}")
 
-            buyer_personality, seller_personality = self.personality_deck.select_two_personalities()
+            # Determine if we should use same personality for this run
+            use_same_personality = False
+            if self.same_personality_count == -1:
+                # Always use same personality
+                use_same_personality = True
+            elif self.same_personality_count > 0 and self.same_personality_runs_done < self.same_personality_count:
+                # Use same personality for specified number of runs
+                use_same_personality = True
+                self.same_personality_runs_done += 1
+
+            # Select personalities based on configuration
+            buyer_personality, seller_personality = self.personality_deck.select_two_personalities(
+                avoid_same=(not use_same_personality)
+            )
+
+            # Log if using same personality
+            if use_same_personality:
+                print(f"Using SAME personality: {buyer_personality.__class__.__name__} vs {seller_personality.__class__.__name__}")
+
             self.logger.log_simulation_start(
                 sim_id, seed.seed_id,
                 buyer_personality.__class__.__name__,
@@ -1000,6 +1025,8 @@ def main():
                        help="Maximum turns per negotiation (default: 20)")
     parser.add_argument("--model", type=str, default="Qwen/Qwen2.5-14B-Instruct",
                        help="Model name for LLM (default: Qwen/Qwen2.5-14B-Instruct)")
+    parser.add_argument("--same-personality", type=int, nargs='?', const=-1, default=0,
+                       help="Force same personality for buyer and seller. Optionally specify number of runs (default: all runs if flag is used)")
 
     # Output configuration
     parser.add_argument("--output-dir", type=str, default=None,
@@ -1033,7 +1060,8 @@ def main():
         max_turns=args.max_turns,
         seed_category=args.seed_category,
         seed_selection_method=args.seed_selection,
-        specific_seed_file=specific_seed_file
+        specific_seed_file=specific_seed_file,
+        same_personality_count=args.same_personality
     )
 
     # Handle specific seed selection
@@ -1063,6 +1091,9 @@ def main():
     print(f"  - Number of negotiations: {args.num_negotiations}")
     print(f"  - Max turns: {args.max_turns}")
     print(f"  - Model: {args.model}")
+    if args.same_personality != 0:
+        same_pers_msg = "all negotiations" if args.same_personality == -1 else f"first {args.same_personality} negotiations"
+        print(f"  - Same personality mode: ENABLED for {same_pers_msg}")
 
     results = runner.run_simulation(
         num_negotiations=args.num_negotiations,
