@@ -37,11 +37,11 @@ If assistant is buyer (they have first turn, if seller then first turn is user a
 
 ## key_strategy options
   - anchor - assistant stands firm at one price and doesn't waver for anything, whether or not the deal is closed
-  - compromise - assistant understands counterparty's position and works towards a compromise
+  - compromise - assistant understands counterparty's position and works towards a compromise (problem-solving)
   - market_logic - assistant uses market context to persuade the counterparty
   - connection_appeal - assistant offers connections to friends/others as incentive for their offer
   - empathy_appeal - assistant appeals to empathy of counterparty, using personal situation as leverage
   - aggro - assistant aggressively attacks counterparty to get a favorable outcome
   - concede - assistant concedes to counterparty in order to close deal
   - walk_away - assistant quickly exits negotiation upon realizing a favorable deal can't be reached
-  - flatter - assistant flatters the counterparty to 
+  - flatter - assistant flatters the counterparty to get a more favorable deal

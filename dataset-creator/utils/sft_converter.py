@@ -39,20 +39,33 @@ class SFTConverter:
         Args:
             seed_dir: Directory containing seed files (default: seeds/)
         """
+        stp = StraightToPoint()
+        dsp = Desperate()
+        skep = Skeptic()
+        bluf = Bluffer()
+        conf = Confrontational()
+        hag = Haggler()
+        weak = WeakEmotional()
+        rational = Rationalizer()
+        stone = StoneWall()
+        opp = Opportunist()
+        high = HighHorse()
+        stub = Stubborn()
+
         # Map personality class names to their tags from personality_deck.py
         self.personality_tags = {
-            "StraightToPoint": StraightToPoint.tag,
-            "Desperate": Desperate.tag,
-            "Skeptic": Skeptic.tag,
-            "Bluffer": Bluffer.tag,
-            "Confrontational": Confrontational.tag,
-            "Haggler": Haggler.tag,
-            "WeakEmotional": WeakEmotional.tag,
-            "Rationalizer": Rationalizer.tag,
-            "StoneWall": StoneWall.tag,
-            "Opportunist": Opportunist.tag,
-            "HighHorse": HighHorse.tag,
-            "Stubborn": Stubborn.tag
+            "StraightToPoint": stp.tag,
+            "Desperate": dsp.tag,
+            "Skeptic": skep.tag,
+            "Bluffer": bluf.tag,
+            "Confrontational": conf.tag,
+            "Haggler": hag.tag,
+            "WeakEmotional": weak.tag,
+            "Rationalizer": rational.tag,
+            "StoneWall": stone.tag,
+            "Opportunist": opp.tag,
+            "HighHorse": high.tag,
+            "Stubborn": stub.tag
         }
 
         # Initialize personality deck for trait access

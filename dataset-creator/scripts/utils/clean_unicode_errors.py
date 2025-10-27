@@ -7,6 +7,7 @@ import sys
 import argparse
 from pathlib import Path
 import re
+import json
 
 # Mapping of problematic Unicode characters to their ASCII replacements
 UNICODE_REPLACEMENTS = {
@@ -125,6 +126,9 @@ def clean_file(file_path, output_path=None, backup=True):
         print(f"Error: File '{file_path}' not found")
         return -1
 
+    # Check if this is a JSON/JSONL file
+    is_json_file = file_path.suffix.lower() in ['.json', '.jsonl']
+
     # Read the file
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
@@ -147,27 +151,164 @@ def clean_file(file_path, output_path=None, backup=True):
     replacement_count = 0
     replacements_made = {}
 
-    # FIRST: Handle inch markers (must be done before general quote replacements)
-    # Pattern matches numbers followed by double quotes (inches)
-    # Includes both ASCII and Unicode double quote variants
-    inch_pattern = r'(\d+(?:\.\d+)?)\s*["\u201c\u201d\u201e\u201f\u2033"]'
-    inch_matches = re.findall(inch_pattern, content)
-    if inch_matches:
-        # Replace inch markers with " inches" to avoid JSON/dict formatting issues
-        content_modified = re.sub(inch_pattern, r'\1 inches', content)
-        inch_replacement_count = len(re.findall(inch_pattern, content))
-        replacement_count += inch_replacement_count
-        replacements_made['inch markers'] = inch_replacement_count
-        content = content_modified
-        print(f"Replaced {inch_replacement_count} inch markers (e.g., 32\" → 32 inches)")
+    # For JSON/JSONL files, process differently to preserve structure
+    if is_json_file:
+        print(f"Processing as {'JSONL' if file_path.suffix.lower() == '.jsonl' else 'JSON'} file...")
 
-    # Replace problematic characters
-    for unicode_char, ascii_replacement in UNICODE_REPLACEMENTS.items():
-        if unicode_char in content:
-            count = content.count(unicode_char)
-            replacement_count += count
-            replacements_made[unicode_char] = count
-            content = content.replace(unicode_char, ascii_replacement)
+        if file_path.suffix.lower() == '.jsonl':
+            # Process JSONL line by line
+            lines = content.split('\n')
+            cleaned_lines = []
+
+            for line_num, line in enumerate(lines, 1):
+                if not line.strip():
+                    cleaned_lines.append(line)
+                    continue
+
+                try:
+                    # Parse JSON
+                    data = json.loads(line)
+
+                    # Clean values in the JSON recursively
+                    def clean_json_value(obj):
+                        nonlocal replacement_count, replacements_made
+
+                        if isinstance(obj, str):
+                            cleaned = obj
+                            # Skip inch pattern for JSON - it causes issues with product names
+                            # Only apply other Unicode replacements
+                            for unicode_char, ascii_replacement in UNICODE_REPLACEMENTS.items():
+                                if unicode_char in cleaned:
+                                    count = cleaned.count(unicode_char)
+                                    replacement_count += count
+                                    replacements_made[unicode_char] = replacements_made.get(unicode_char, 0) + count
+                                    cleaned = cleaned.replace(unicode_char, ascii_replacement)
+                            return cleaned
+                        elif isinstance(obj, dict):
+                            return {k: clean_json_value(v) for k, v in obj.items()}
+                        elif isinstance(obj, list):
+                            return [clean_json_value(item) for item in obj]
+                        else:
+                            return obj
+
+                    cleaned_data = clean_json_value(data)
+                    cleaned_lines.append(json.dumps(cleaned_data, ensure_ascii=False))
+
+                except json.JSONDecodeError as e:
+                    print(f"Warning: Line {line_num} has JSON error: {e}")
+                    # Try to fix common JSON issues before falling back to plain text
+                    fixed_line = line
+
+                    # Fix unescaped quotes in JSON strings
+                    # Pattern: find quotes that are inside JSON string values (between : and , or })
+                    # This regex looks for patterns like: "item": "text with " quote",
+                    import re
+                    # Try to fix inch markers that are unescaped in JSON strings
+                    # Look for patterns like: "field": "...number" ...text",
+                    pattern = r'("item":\s*"[^"]*?)(\d+)(")([^"]*?")'
+                    if re.search(pattern, fixed_line):
+                        fixed_line = re.sub(pattern, r'\1\2\\\3\4', fixed_line)
+                        print(f"  Fixed unescaped inch marker in line {line_num}")
+                        replacement_count += 1
+                        replacements_made['unescaped quotes'] = replacements_made.get('unescaped quotes', 0) + 1
+
+                    # Try parsing the fixed line
+                    try:
+                        data = json.loads(fixed_line)
+                        # Clean values in the JSON recursively
+                        def clean_json_value(obj):
+                            nonlocal replacement_count, replacements_made
+
+                            if isinstance(obj, str):
+                                cleaned = obj
+                                # Skip inch pattern for JSON - it causes issues with product names
+                                # Only apply other Unicode replacements
+                                for unicode_char, ascii_replacement in UNICODE_REPLACEMENTS.items():
+                                    if unicode_char in cleaned:
+                                        count = cleaned.count(unicode_char)
+                                        replacement_count += count
+                                        replacements_made[unicode_char] = replacements_made.get(unicode_char, 0) + count
+                                        cleaned = cleaned.replace(unicode_char, ascii_replacement)
+                                return cleaned
+                            elif isinstance(obj, dict):
+                                return {k: clean_json_value(v) for k, v in obj.items()}
+                            elif isinstance(obj, list):
+                                return [clean_json_value(item) for item in obj]
+                            else:
+                                return obj
+
+                        cleaned_data = clean_json_value(data)
+                        cleaned_lines.append(json.dumps(cleaned_data, ensure_ascii=False))
+                    except json.JSONDecodeError:
+                        # If still can't parse, fall back to plain text cleaning
+                        print(f"  Could not fix JSON, cleaning as plain text")
+                        cleaned = fixed_line
+                        for unicode_char, ascii_replacement in UNICODE_REPLACEMENTS.items():
+                            if unicode_char in cleaned:
+                                count = cleaned.count(unicode_char)
+                                replacement_count += count
+                                replacements_made[unicode_char] = replacements_made.get(unicode_char, 0) + count
+                                cleaned = cleaned.replace(unicode_char, ascii_replacement)
+                        cleaned_lines.append(cleaned)
+
+            content = '\n'.join(cleaned_lines)
+        else:
+            # Process as single JSON object
+            try:
+                data = json.loads(content)
+
+                def clean_json_value(obj):
+                    nonlocal replacement_count, replacements_made
+
+                    if isinstance(obj, str):
+                        cleaned = obj
+                        # Skip inch pattern for JSON
+                        for unicode_char, ascii_replacement in UNICODE_REPLACEMENTS.items():
+                            if unicode_char in cleaned:
+                                count = cleaned.count(unicode_char)
+                                replacement_count += count
+                                replacements_made[unicode_char] = replacements_made.get(unicode_char, 0) + count
+                                cleaned = cleaned.replace(unicode_char, ascii_replacement)
+                        return cleaned
+                    elif isinstance(obj, dict):
+                        return {k: clean_json_value(v) for k, v in obj.items()}
+                    elif isinstance(obj, list):
+                        return [clean_json_value(item) for item in obj]
+                    else:
+                        return obj
+
+                cleaned_data = clean_json_value(data)
+                content = json.dumps(cleaned_data, ensure_ascii=False, indent=2)
+
+            except json.JSONDecodeError as e:
+                print(f"Warning: File is not valid JSON, cleaning as plain text: {e}")
+                # Fall back to plain text cleaning
+                is_json_file = False
+
+    # For non-JSON files, use the original cleaning logic
+    if not is_json_file:
+        # FIRST: Handle inch markers (must be done before general quote replacements)
+        # Pattern matches numbers followed by double quotes (inches)
+        # But make it more specific to avoid false positives
+        # Look for patterns like: 32", 12.5", with optional space, and NOT preceded by a colon or equals
+        inch_pattern = r'(?<![:\w])(\d+(?:\.\d+)?)\s*["\u201c\u201d\u201e\u201f\u2033"](?=\s|,|;|\)|$)'
+        inch_matches = re.findall(inch_pattern, content)
+        if inch_matches:
+            # Replace inch markers with " inches" to avoid JSON/dict formatting issues
+            content_modified = re.sub(inch_pattern, r'\1 inches', content)
+            inch_replacement_count = len(inch_matches)
+            replacement_count += inch_replacement_count
+            replacements_made['inch markers'] = inch_replacement_count
+            content = content_modified
+            print(f"Replaced {inch_replacement_count} inch markers (e.g., 32\" → 32 inches)")
+
+        # Replace problematic characters
+        for unicode_char, ascii_replacement in UNICODE_REPLACEMENTS.items():
+            if unicode_char in content:
+                count = content.count(unicode_char)
+                replacement_count += count
+                replacements_made[unicode_char] = count
+                content = content.replace(unicode_char, ascii_replacement)
 
     # Create backup if requested and changes were made
     if backup and replacement_count > 0 and output_path is None:
@@ -188,9 +329,11 @@ def clean_file(file_path, output_path=None, backup=True):
         if replacements_made:
             print("\nReplacements made:")
             for char, count in sorted(replacements_made.items(), key=lambda x: x[1], reverse=True):
-                # Handle inch markers specially
+                # Handle special cases
                 if char == 'inch markers':
                     print(f"  Inch markers (e.g., 32\" → 32 inches): {count} occurrences")
+                elif char == 'unescaped quotes':
+                    print(f"  Fixed unescaped quotes in JSON strings: {count} occurrences")
                 else:
                     char_name = f"U+{ord(char):04X}"
                     replacement = UNICODE_REPLACEMENTS[char]
