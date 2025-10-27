@@ -288,17 +288,19 @@ class SimulationRunner:
             self.logger.sim_logger.debug(f"[{sim_id}] Control params - beta_b: {self.control_params.beta_b}, beta_s: {self.control_params.beta_s}")
 
             # Initialize negotiation state with separate buyer/seller prices
+            # Set initial buyer position to alpha * seller_min for consistency with first offer
+            initial_buyer_position = round(buyer_personality.traits.alpha * seed.seller_min, 2)
             state = NegotiationState(
                 r=0,  # Turn index
                 Ps=seed.seller_min,
-                Pb=seed.buyer_max,
+                Pb=initial_buyer_position,  # Buyer's initial position based on alpha
                 buyer_offer=0.0,  # Buyer hasn't made an offer yet
                 seller_offer=seed.seller_list,  # Seller starts at list price
                 n_b_k=0,  # Extra items for buyer (to be determined from seed)
                 n_s_k=len(seed.extras_available) if seed.extras_available else 0,
                 l_k=0  # Number of extras included
             )
-            self.logger.sim_logger.debug(f"[{sim_id}] Initial state - Ps: ${seed.seller_min}, Pb: ${seed.buyer_max}, P_k: ${seed.seller_list}")
+            self.logger.sim_logger.debug(f"[{sim_id}] Initial state - Ps: ${seed.seller_min}, Pb: ${initial_buyer_position:.2f}, P_k: ${seed.seller_list}")
 
             # Initialize price state
             price_state = PriceState(

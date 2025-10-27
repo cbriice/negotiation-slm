@@ -41,7 +41,7 @@ class PriceDynamics:
         Returns:
             Initial buyer offer price
         """
-        return seller_min * alpha
+        return round(seller_min * alpha, 2)
 
     def calculate_faratin_concession(self,
                                     current_own: float,
