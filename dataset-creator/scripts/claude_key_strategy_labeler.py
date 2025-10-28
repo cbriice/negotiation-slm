@@ -32,7 +32,8 @@ STRATEGY_TAGS = {
 }
 
 # Claude API prompt template
-LABELING_PROMPT = """You are a negotiation labeler labeling negotiations based on the tactic **MOST used** by the ASSISTANT during the negotiation.
+LABELING_PROMPT = """
+You are a negotiation strategy expert LABELING negotiations based on the strategy **MOST used** by the ASSISTANT during the negotiation. You only output one-word tags from the list below.
 You can choose from ONE of these tags:
   - **anchor** - assistant stands firm at one price and doesn't waver for anything, whether or not the deal is closed
   - **compromise** - assistant understands counterparty's position and works towards a compromise (problem-solving)
@@ -43,7 +44,7 @@ You can choose from ONE of these tags:
   - **concede** - assistant concedes to counterparty in order to close deal
   - **walk_away** - assistant quickly exits negotiation upon realizing a favorable deal can't be reached
   - **flatter** - assistant flatters the counterparty to get a more favorable deal
-You must output ONE unformatted tag and nothing else.
+Your response must have ONE SINGLE WORD and that one word is one of the tags listed above. You are not responding as the tag, only output one single unformatted tag word and nothing else.
 Negotiation:
 """
 
