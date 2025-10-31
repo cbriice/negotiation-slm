@@ -36,27 +36,12 @@ If assistant is buyer (they have first turn, if seller then first turn is user a
 ```
 
 ## key_strategy options
-  - anchor - assistant stands firm at one price and doesn't waver for anything, whether or not the deal is closed
-  - compromise - assistant understands counterparty's position and works towards a compromise (problem-solving)
-  - market_logic - assistant uses market context to persuade the counterparty
-  - connection_appeal - assistant offers connections to friends/others as incentive for their offer
-  - empathy_appeal - assistant appeals to empathy of counterparty, using personal situation as leverage
-  - aggro - assistant aggressively attacks counterparty to get a favorable outcome
-  - concede - assistant concedes to counterparty in order to close deal
-  - walk_away - assistant quickly exits negotiation upon realizing a favorable deal can't be reached
-  - flatter - assistant flatters the counterparty to get a more favorable deal
-
-### prompt for claude api call script
-You are a negotiation labeler labeling negotiations based on the tactic **MOST used** by the ASSISTANT during the negotiation.
-You can choose from ONE of these tags:
-  - **anchor** - assistant stands firm at one price and doesn't waver for anything, whether or not the deal is closed
-  - **compromise** - assistant understands counterparty's position and works towards a compromise (problem-solving)
-  - **market_logic** - assistant uses market context to persuade the counterparty
-  - **connection_appeal** - assistant offers connections to friends/others as incentive for their offer
-  - **empathy_appeal** - assistant appeals to empathy of counterparty, using personal situation as leverage
-  - **aggro** - assistant aggressively attacks counterparty to get a favorable outcome
-  - **concede** - assistant concedes to counterparty in order to close deal
-  - **walk_away** - assistant quickly exits negotiation upon realizing a favorable deal can't be reached
-  - **flatter** - assistant flatters the counterparty to get a more favorable deal
-You must output ONE unformatted tag and nothing else. 
-Negotiation:
+- anchor: assistant stands firm at one price and repeats it multiple times, won't budge, "final offer"
+- compromise: assistant acknowledges both positions and works with counterparty - "meet halfway", etc.
+- market_logic: assistant cites SPECIFIC external prices/data, compares to other items in the market, "market value"
+- connection_appeal: assistant offers connections to friends/others as incentive
+- empathy_appeal: assistant uses personal hardship story, "I really need", sympathy play
+- aggro: assistant aggressively attacks counterparty. Insults, "ridiculous", "crazy", righteousness
+- concede: assistant accepts bad terms or gives in to pressure. Doesn't fight for their own position
+- walk_away: assistant QUICKLY and explicitly exits upon realizing no favorable deal. short negotiation
+- flatter: assistant compliments/flatters counterparty to try and get a favorable deal
