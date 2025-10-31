@@ -242,6 +242,9 @@ class SFTConverter:
         # Get number of rounds
         num_rounds = len(dialog)
 
+        # Extract seed_id
+        seed_id = negotiation.get("seed_id")
+
         # Create buyer-as-assistant packet
         buyer_packet = {
             "messages": self.convert_dialog_to_messages(dialog, "BUYER"),
@@ -251,6 +254,7 @@ class SFTConverter:
                 "key_strategy": ""  # To be filled by separate module
             },
             "meta": {
+                "seed_id": seed_id,
                 "opponent_style": seller_tag,
                 "favorable_outcome": favorable_outcome_buyer,
                 "deal_closed": str(deal_closed).lower(),
@@ -267,6 +271,7 @@ class SFTConverter:
                 "key_strategy": ""  # To be filled by separate module
             },
             "meta": {
+                "seed_id": seed_id,
                 "opponent_style": buyer_tag,
                 "favorable_outcome": favorable_outcome_seller,
                 "deal_closed": str(deal_closed).lower(),

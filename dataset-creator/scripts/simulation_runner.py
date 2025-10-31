@@ -128,8 +128,29 @@ class SimulationRunner:
         # Track simulation results
         self.completed_negotiations = []
 
+        # Track personality pairs used per seed to avoid duplicates
+        self.seed_personality_pairs = {}  # seed_id -> set of (buyer_pers, seller_pers) tuples
+
         self.logger.sim_logger.info("SimulationRunner initialization complete!")
         self.logger.sim_logger.info("="*60)
+
+    def reset_personality_tracking(self):
+        """Reset the personality pair tracking for new bulk runs."""
+        self.seed_personality_pairs = {}
+        self.logger.sim_logger.info("Reset personality pair tracking")
+
+    def get_personality_pair_summary(self) -> str:
+        """Get a summary of personality pairs used per seed."""
+        summary = []
+        summary.append("=== Personality Pair Usage Summary ===")
+
+        for seed_id in sorted(self.seed_personality_pairs.keys()):
+            pairs = self.seed_personality_pairs[seed_id]
+            summary.append(f"\nSeed {seed_id}: {len(pairs)} unique pair(s)")
+            for buyer, seller in sorted(pairs):
+                summary.append(f"  - {buyer} vs {seller}")
+
+        return "\n".join(summary)
 
     def create_negotiation_packet(self, seed: NegotiationSeed,
                                  buyer_personality, seller_personality) -> Dict:
@@ -263,14 +284,50 @@ class SimulationRunner:
                 use_same_personality = True
                 self.same_personality_runs_done += 1
 
-            # Select personalities based on configuration
-            buyer_personality, seller_personality = self.personality_deck.select_two_personalities(
-                avoid_same=(not use_same_personality)
-            )
+            # Get previously used personality pairs for this seed
+            used_pairs = self.seed_personality_pairs.get(seed.seed_id, set())
 
-            # Log if using same personality
+            # Select personalities, avoiding duplicates
+            max_attempts = 50  # Prevent infinite loop if all combinations exhausted
+            attempts = 0
+            valid_pair_found = False
+
+            while attempts < max_attempts:
+                buyer_personality, seller_personality = self.personality_deck.select_two_personalities(
+                    avoid_same=(not use_same_personality)
+                )
+
+                # Create pair identifier
+                pair_id = (buyer_personality.__class__.__name__, seller_personality.__class__.__name__)
+
+                # Check if this pair has been used for this seed
+                if pair_id not in used_pairs:
+                    valid_pair_found = True
+                    # Track this personality pair for the seed
+                    if seed.seed_id not in self.seed_personality_pairs:
+                        self.seed_personality_pairs[seed.seed_id] = set()
+                    self.seed_personality_pairs[seed.seed_id].add(pair_id)
+                    break
+
+                attempts += 1
+
+            if not valid_pair_found:
+                self.logger.sim_logger.warning(
+                    f"Could not find unused personality pair for seed {seed.seed_id} after {max_attempts} attempts. "
+                    f"Using last selected pair (may be duplicate)."
+                )
+                print(f"Warning: All personality combinations may have been used for seed {seed.seed_id}")
+                # Still track it even if duplicate
+                if seed.seed_id not in self.seed_personality_pairs:
+                    self.seed_personality_pairs[seed.seed_id] = set()
+                self.seed_personality_pairs[seed.seed_id].add(pair_id)
+
+            # Log personality selection
             if use_same_personality:
                 print(f"Using SAME personality: {buyer_personality.__class__.__name__} vs {seller_personality.__class__.__name__}")
+            elif len(used_pairs) > 0:
+                print(f"Selected unique personality pair #{len(used_pairs)+1} for seed {seed.seed_id}: "
+                      f"{buyer_personality.__class__.__name__} vs {seller_personality.__class__.__name__}")
 
             self.logger.log_simulation_start(
                 sim_id, seed.seed_id,
@@ -823,7 +880,10 @@ class SimulationRunner:
             "seed_category": self.seed_category,
             "seed_selection_method": self.seed_selection_method,
             "deals_completed": sum(1 for n in self.completed_negotiations if n.get("deal_closed")),
-            "deals_failed": sum(1 for n in self.completed_negotiations if not n.get("deal_closed"))
+            "deals_failed": sum(1 for n in self.completed_negotiations if not n.get("deal_closed")),
+            "personality_pairs_per_seed": {
+                str(seed_id): list(pairs) for seed_id, pairs in self.seed_personality_pairs.items()
+            }
         }
 
         self.logger.sim_logger.info(f"Run statistics - Total: {metadata['total_negotiations']}, Deals: {metadata['deals_completed']}, No-deals: {metadata['deals_failed']}")
@@ -937,7 +997,11 @@ class SimulationRunner:
                     avg_price = sum(prices) / len(prices)
                     f.write(f"Average Final Price: ${avg_price:.2f}\n")
                     f.write(f"Min Price: ${min(prices):.2f}\n")
-                    f.write(f"Max Price: ${max(prices):.2f}\n")
+                    f.write(f"Max Price: ${max(prices):.2f}\n\n")
+
+            # Add personality pair usage summary
+            if self.seed_personality_pairs:
+                f.write("\n" + self.get_personality_pair_summary() + "\n")
 
         # Log saved files
         self.logger.sim_logger.info(f"Saved flattened dataset to {flattened_file}")
