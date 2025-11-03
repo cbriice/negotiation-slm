@@ -34,7 +34,7 @@ STRATEGY_TAGS = {
 
 # Batch labeling prompt template
 BATCH_LABELING_PROMPT = """
-You are a negotiation strategy expert labeling negotiations based on the strategy used by the ASSISTANT. 
+You are a negotiation strategy expert labeling negotiations based on the strategy used by the ASSISTANT. This is for the purpose of training a small language model to negotiate through SFT training. The model should be able to associate the dialog with the tag you output.
 IMPORTANT: These negotiations contain a diverse range of tactics. Look for SPECIFIC markers in negotiation that match the following tags, not just general tone. Pick the tag that could be paired with the dialog as a label for someone learning negotiation tactics.
 
 Strategy identification tags:
@@ -135,6 +135,57 @@ class OptimizedClaudeStrategyLabeler:
 
         return "\n".join(formatted)
 
+    def get_single_label(self, negotiation: Dict[str, Any], retry_count: int = 2) -> Optional[str]:
+        """
+        Get strategy label for a single negotiation (fallback method).
+
+        Args:
+            negotiation: Dict with 'id' and 'messages'
+            retry_count: Number of retries on failure
+
+        Returns:
+            Strategy tag or None if failed
+        """
+        neg_id = negotiation['id']
+        messages = negotiation['messages']
+        formatted = self.format_negotiation(messages)
+
+        # Create a prompt for single negotiation
+        prompt = BATCH_LABELING_PROMPT + f"\n=== NEGOTIATION {neg_id} ===\n{formatted}\n"
+
+        for attempt in range(retry_count):
+            try:
+                response = self.client.messages.create(
+                    model=self.model,
+                    max_tokens=50,
+                    temperature=self.temp,
+                    messages=[
+                        {"role": "user", "content": prompt}
+                    ]
+                )
+
+                self.stats["api_calls"] += 1
+
+                if response.content and len(response.content) > 0:
+                    response_text = getattr(response.content[0], 'text', '').strip()
+
+                    # Parse response for tag
+                    if ':' in response_text:
+                        parts = response_text.split(':', 1)
+                        if len(parts) == 2:
+                            tag = parts[1].strip().lower()
+                            if tag in STRATEGY_TAGS:
+                                return tag
+                            else:
+                                print(f"Warning: Invalid tag '{tag}' for single negotiation {neg_id}")
+
+            except Exception as e:
+                print(f"Single label API call failed for {neg_id} (attempt {attempt + 1}/{retry_count}): {e}")
+                if attempt < retry_count - 1:
+                    time.sleep(1)
+
+        return None
+
     def get_batch_labels(self, negotiations_batch: List[Dict[str, Any]], retry_count: int = 3) -> Dict[str, str]:
         """
         Get strategy labels for a batch of negotiations.
@@ -175,8 +226,21 @@ class OptimizedClaudeStrategyLabeler:
 
                 # Parse the response
                 try:
+                    # Check if response has content
+                    if not response.content or len(response.content) == 0:
+                        print(f"Warning: Empty response from API (attempt {attempt + 1})")
+                        continue
+
                     content_block = response.content[0]
                     response_text = getattr(content_block, 'text', '').strip()
+
+                    if not response_text:
+                        print(f"Warning: Empty text in response (attempt {attempt + 1})")
+                        continue
+
+                    # Debug logging for troubleshooting
+                    if attempt > 0:
+                        print(f"Debug: Response text preview: {response_text[:200]}...")
 
                     # Parse each line for ID: tag format
                     labels = {}
@@ -209,6 +273,9 @@ class OptimizedClaudeStrategyLabeler:
 
                 except (IndexError, AttributeError) as e:
                     print(f"Warning: Failed to parse response: {e}")
+                    print(f"Debug: Response object type: {type(response)}")
+                    if hasattr(response, 'content'):
+                        print(f"Debug: Response content length: {len(response.content) if response.content else 'None'}")
                     continue
 
             except Exception as e:
@@ -291,6 +358,14 @@ class OptimizedClaudeStrategyLabeler:
                 # Get labels for this batch
                 labels = self.get_batch_labels(batch)
 
+                # If batch labeling completely failed, try individual labeling as fallback
+                if not labels:
+                    print(f"Batch labeling failed completely. Attempting individual labeling for {len(batch)} negotiations...")
+                    for item in batch:
+                        single_label = self.get_single_label(item)
+                        if single_label:
+                            labels[str(item['id'])] = single_label
+
                 # Update packets with labels
                 for item in batch:
                     idx = str(item['id'])
@@ -303,8 +378,26 @@ class OptimizedClaudeStrategyLabeler:
                         packet["system"]["key_strategy"] = labels[idx]
                         self.stats["successful"] += 1
                     else:
-                        self.stats["failed"] += 1
-                        print(f"Warning: Failed to get label for packet {idx}")
+                        # Try individual labeling as last resort
+                        print(f"Attempting individual labeling for packet {idx}...")
+                        single_label = self.get_single_label(item)
+
+                        if single_label:
+                            if "system" not in packet:
+                                packet["system"] = {}
+                            packet["system"]["key_strategy"] = single_label
+                            self.stats["successful"] += 1
+                            print(f"  -> Successfully labeled packet {idx} with '{single_label}'")
+                        else:
+                            self.stats["failed"] += 1
+                            # Enhanced error logging
+                            print(f"Warning: Failed to get label for packet {idx}")
+                            # Log first few messages to help debug
+                            if len(item['messages']) > 0:
+                                print(f"  -> First message role: {item['messages'][0].get('role', 'unknown')}")
+                                preview = item['messages'][0].get('content', '')[:100]
+                                print(f"  -> Content preview: {preview}...")
+                            print(f"  -> Batch IDs in this request: {[str(b['id']) for b in batch]}")
 
                     labeled_packets.append(packet)
                     pbar.update(1)

@@ -131,6 +131,9 @@ class SimulationRunner:
         # Track personality pairs used per seed to avoid duplicates
         self.seed_personality_pairs = {}  # seed_id -> set of (buyer_pers, seller_pers) tuples
 
+        # Load existing personality pairings from file
+        self.existing_pairings = self._load_existing_pairings()
+
         self.logger.sim_logger.info("SimulationRunner initialization complete!")
         self.logger.sim_logger.info("="*60)
 
@@ -138,6 +141,40 @@ class SimulationRunner:
         """Reset the personality pair tracking for new bulk runs."""
         self.seed_personality_pairs = {}
         self.logger.sim_logger.info("Reset personality pair tracking")
+
+    def _load_existing_pairings(self) -> Dict[str, set]:
+        """
+        Load existing personality pairings from JSON file.
+
+        Returns:
+            Dictionary mapping seed_id to set of (assistant, opponent) tuples
+        """
+        pairings_file = Path("data/existing_personality_pairings.json")
+        existing = {}
+
+        if pairings_file.exists():
+            try:
+                with open(pairings_file, 'r') as f:
+                    data = json.load(f)
+
+                # Convert to sets of tuples for efficient lookup
+                for seed_id, pairings in data.items():
+                    existing[seed_id] = set()
+                    for pairing in pairings:
+                        # Store both directions since assistant/opponent maps to buyer/seller
+                        existing[seed_id].add((pairing['assistant'], pairing['opponent']))
+                        existing[seed_id].add((pairing['opponent'], pairing['assistant']))
+
+                self.logger.sim_logger.info(f"Loaded existing pairings for {len(existing)} seeds from {pairings_file}")
+                total_pairs = sum(len(pairs) // 2 for pairs in existing.values())  # Divide by 2 since we store both directions
+                self.logger.sim_logger.info(f"Total existing unique pairings: {total_pairs}")
+            except Exception as e:
+                self.logger.sim_logger.warning(f"Failed to load existing pairings: {e}")
+                existing = {}
+        else:
+            self.logger.sim_logger.info("No existing personality pairings file found, starting fresh")
+
+        return existing
 
     def get_personality_pair_summary(self) -> str:
         """Get a summary of personality pairs used per seed."""
@@ -194,29 +231,38 @@ class SimulationRunner:
             return seed
 
         elif self.seed_selection_method == "sequential":
-            # Sequential selection
+            # Sequential selection with cycling
             if self.seed_category:
                 # Get seeds for specific category
                 category_loader = self.seed_loader.get_loader_for_category(self.seed_category)
                 if category_loader:
-                    seed = category_loader.get_next_seed()
-                    if seed:
-                        self.logger.sim_logger.debug(f"Selected sequential seed from category {self.seed_category}: {seed.seed_id}")
-                    return seed
+                    category_seeds = category_loader.get_all_seeds()
+                    if category_seeds:
+                        # Wrap around using modulo to cycle through seeds
+                        seed_idx = self.seed_index % len(category_seeds)
+                        seed = category_seeds[seed_idx]
+                        self.seed_index += 1
+                        self.logger.sim_logger.debug(f"Selected sequential seed from category {self.seed_category}: {seed.seed_id} (cycle {self.seed_index // len(category_seeds)}, idx {seed_idx})")
+                        return seed
             else:
-                # Get from all seeds sequentially
-                if self.seed_index < len(self.seed_loader.all_seeds):
-                    seed = self.seed_loader.all_seeds[self.seed_index]
+                # Get from all seeds sequentially with cycling
+                if self.seed_loader.all_seeds:
+                    # Wrap around using modulo to cycle through seeds
+                    seed_idx = self.seed_index % len(self.seed_loader.all_seeds)
+                    seed = self.seed_loader.all_seeds[seed_idx]
                     self.seed_index += 1
-                    self.logger.sim_logger.debug(f"Selected sequential seed {self.seed_index}/{len(self.seed_loader.all_seeds)}: {seed.seed_id}")
+                    self.logger.sim_logger.debug(f"Selected sequential seed {seed_idx + 1}/{len(self.seed_loader.all_seeds)}: {seed.seed_id} (cycle {self.seed_index // len(self.seed_loader.all_seeds)})")
                     return seed
 
         elif self.seed_selection_method == "all":
-            # Return seeds in order (handled by iteration in run_simulation)
-            if self.seed_index < len(self.seed_loader.all_seeds):
-                seed = self.seed_loader.all_seeds[self.seed_index]
+            # Return seeds in order with cycling support
+            if self.seed_loader.all_seeds:
+                # Use modulo to cycle through all seeds
+                seed_idx = self.seed_index % len(self.seed_loader.all_seeds)
+                seed = self.seed_loader.all_seeds[seed_idx]
                 self.seed_index += 1
-                self.logger.sim_logger.debug(f"Selected seed {self.seed_index}/{len(self.seed_loader.all_seeds)}: {seed.seed_id}")
+                cycle_num = self.seed_index // len(self.seed_loader.all_seeds)
+                self.logger.sim_logger.debug(f"Selected seed {seed_idx + 1}/{len(self.seed_loader.all_seeds)}: {seed.seed_id} (cycle {cycle_num})")
                 return seed
 
         self.logger.sim_logger.warning("No more seeds available")
@@ -240,17 +286,23 @@ class SimulationRunner:
         results = []
         start_time = time.time()
 
-        # Determine number of iterations based on selection method
+        # Log information about seed selection method
         if self.seed_selection_method == "all":
-            # Run once for each seed
+            # Calculate how many seeds available and cycles needed
             if self.seed_category:
                 category_loader = self.seed_loader.get_loader_for_category(self.seed_category)
                 total_seeds = len(category_loader.get_all_seeds()) if category_loader else 0
             else:
                 total_seeds = len(self.seed_loader.all_seeds)
-            num_negotiations = total_seeds
-            self.logger.sim_logger.info(f"Running negotiations for all {num_negotiations} seeds")
-            print(f"Running negotiations for all {num_negotiations} seeds")
+
+            # Calculate cycles if running more negotiations than seeds
+            if num_negotiations > total_seeds:
+                cycles = (num_negotiations + total_seeds - 1) // total_seeds
+                self.logger.sim_logger.info(f"Running {num_negotiations} negotiations using all {total_seeds} seeds ({cycles} cycles)")
+                print(f"Running {num_negotiations} negotiations using all {total_seeds} seeds ({cycles} cycles)")
+            else:
+                self.logger.sim_logger.info(f"Running {num_negotiations} negotiations from {total_seeds} available seeds")
+                print(f"Running {num_negotiations} negotiations from {total_seeds} available seeds")
 
         for i in range(num_negotiations):
             self.logger.sim_logger.info(f"Starting negotiation {i+1}/{num_negotiations}")
@@ -284,8 +336,15 @@ class SimulationRunner:
                 use_same_personality = True
                 self.same_personality_runs_done += 1
 
-            # Get previously used personality pairs for this seed
-            used_pairs = self.seed_personality_pairs.get(seed.seed_id, set())
+            # Get previously used personality pairs for this seed (both from existing data and runtime)
+            runtime_pairs = self.seed_personality_pairs.get(seed.seed_id, set())
+            existing_pairs = self.existing_pairings.get(str(seed.seed_id), set())  # Convert seed_id to string for lookup
+            all_used_pairs = runtime_pairs | existing_pairs
+
+            # Log existing pairs info
+            if existing_pairs:
+                self.logger.sim_logger.debug(f"[{sim_id}] Found {len(existing_pairs)//2} existing personality pairs for seed {seed.seed_id}")
+                print(f"Found {len(existing_pairs)//2} existing personality pairs for seed {seed.seed_id}")
 
             # Select personalities, avoiding duplicates
             max_attempts = 50  # Prevent infinite loop if all combinations exhausted
@@ -300,23 +359,28 @@ class SimulationRunner:
                 # Create pair identifier
                 pair_id = (buyer_personality.__class__.__name__, seller_personality.__class__.__name__)
 
-                # Check if this pair has been used for this seed
-                if pair_id not in used_pairs:
+                # Check if this pair has been used for this seed (in existing data or runtime)
+                if pair_id not in all_used_pairs:
                     valid_pair_found = True
                     # Track this personality pair for the seed
                     if seed.seed_id not in self.seed_personality_pairs:
                         self.seed_personality_pairs[seed.seed_id] = set()
                     self.seed_personality_pairs[seed.seed_id].add(pair_id)
+                    print(f"✓ Selected NEW personality pair for seed {seed.seed_id}: {pair_id[0]} vs {pair_id[1]}")
                     break
 
                 attempts += 1
+                if attempts % 10 == 0:
+                    self.logger.sim_logger.debug(f"[{sim_id}] Attempt {attempts}: pair {pair_id} already exists, trying again...")
 
             if not valid_pair_found:
                 self.logger.sim_logger.warning(
                     f"Could not find unused personality pair for seed {seed.seed_id} after {max_attempts} attempts. "
-                    f"Using last selected pair (may be duplicate)."
+                    f"Using last selected pair (may be duplicate). Total used pairs: {len(all_used_pairs)//2}"
                 )
-                print(f"Warning: All personality combinations may have been used for seed {seed.seed_id}")
+                print(f"⚠ Warning: Could not find unused pair for seed {seed.seed_id} after {max_attempts} attempts")
+                print(f"  Total pairs already used: {len(all_used_pairs)//2}")
+                print(f"  Using duplicate pair: {pair_id[0]} vs {pair_id[1]}")
                 # Still track it even if duplicate
                 if seed.seed_id not in self.seed_personality_pairs:
                     self.seed_personality_pairs[seed.seed_id] = set()
