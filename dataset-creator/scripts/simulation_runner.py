@@ -389,8 +389,8 @@ class SimulationRunner:
             # Log personality selection
             if use_same_personality:
                 print(f"Using SAME personality: {buyer_personality.__class__.__name__} vs {seller_personality.__class__.__name__}")
-            elif len(used_pairs) > 0:
-                print(f"Selected unique personality pair #{len(used_pairs)+1} for seed {seed.seed_id}: "
+            elif len(all_used_pairs) > 0:
+                print(f"Selected unique personality pair #{len(all_used_pairs)+1} for seed {seed.seed_id}: "
                       f"{buyer_personality.__class__.__name__} vs {seller_personality.__class__.__name__}")
 
             self.logger.log_simulation_start(
