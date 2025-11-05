@@ -16,3 +16,5 @@ tqdm>=4.65.0
 
 anthropic
 python-dotenv
+
+flash-attn

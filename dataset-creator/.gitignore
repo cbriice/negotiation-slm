@@ -8,3 +8,4 @@ logs/
 .claude/
 data/
 seeds/
+temp_data/
