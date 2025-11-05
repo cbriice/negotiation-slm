@@ -282,7 +282,6 @@ class SimulationRunner:
         """
         self.logger.sim_logger.info("="*60)
         self.logger.sim_logger.info(f"Starting simulation run with {num_negotiations} negotiations")
-
         results = []
         start_time = time.time()
 
@@ -456,6 +455,7 @@ class SimulationRunner:
         self.logger.sim_logger.info(f"Simulation run complete. Total time: {total_duration:.2f}s, Average: {total_duration/len(results):.2f}s per negotiation")
 
         return results
+
 
     def _run_single_negotiation(self, packet: Dict, state: NegotiationState,
                                 price_state: PriceState) -> Dict:

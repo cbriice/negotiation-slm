@@ -13,6 +13,7 @@ import re
 from dataclasses import dataclass
 import gc
 import unicodedata
+from utils.performance_optimizer import PerformanceOptimizer
 
 from utils.logger_config import get_logger
 from utils.exceptions import (
@@ -56,6 +57,13 @@ class LLMInterface:
         self.llm_logger = self.sim_logger_instance.llm_logger  # For LLM-specific logging
         self.error_logger = self.sim_logger_instance.error_logger  # For errors
 
+        # Initialize performance optimizer
+        self.perf_optimizer = PerformanceOptimizer()
+
+        # Enable TF32 for better performance on RTX 40 series
+        if self.config.use_gpu:
+            self.perf_optimizer.enable_tf32()
+
         # Initialize models and tokenizers
         self.model = None
         self.tokenizer = None
@@ -94,27 +102,47 @@ class LLMInterface:
                 self.tokenizer.pad_token = self.tokenizer.eos_token
 
             # Configure model loading kwargs
-            model_kwargs = {
+            model_kwargs: Dict[str, Any] = {
                 "trust_remote_code": True,
-                "device_map": self.config.device_map if self.config.use_gpu else None
             }
 
-            # Add quantization config if using 4-bit
-            if self.config.load_in_4bit and self.config.use_gpu:
-                from transformers import BitsAndBytesConfig
-                model_kwargs["quantization_config"] = BitsAndBytesConfig(
-                    load_in_4bit=True,
-                    bnb_4bit_compute_dtype=torch.float16,
-                    bnb_4bit_quant_type="nf4",
-                    bnb_4bit_use_double_quant=True
-                )
-                # Don't pass load_in_4bit separately when using quantization_config
+            # Get optimized device map (keeps safety buffer for activations)
+            if self.config.use_gpu:
+                # Check available memory and decide on device mapping
+                device_map = self.perf_optimizer.optimize_device_map(model_size_gb=7.0)
 
-            # Set dtype (torch_dtype is deprecated)
-            if self.config.torch_dtype == "auto":
-                model_kwargs["dtype"] = "auto"
+                # Handle device mapping - "cuda:0" means full GPU, others are device_map strategies
+                if device_map.startswith("cuda:"):
+                    # Full GPU loading - use device parameter instead of device_map
+                    model_kwargs["device"] = device_map
+                    self.logger.info(f"Loading entire model on {device_map}")
+                else:
+                    # Use device_map for auto/balanced strategies
+                    model_kwargs["device_map"] = device_map
+                    self.logger.info(f"Using device_map strategy: {device_map}")
             else:
-                model_kwargs["dtype"] = getattr(torch, self.config.torch_dtype, torch.float16)
+                model_kwargs["device_map"] = None
+
+            # Add quantization config if using 4-bit with optimized settings
+            if self.config.load_in_4bit and self.config.use_gpu:
+                # Use bfloat16 for RTX 50 series (5070 Ti)
+                model_kwargs["quantization_config"] = self.perf_optimizer.get_optimized_quantization_config(
+                    use_bfloat16=True  # RTX 5070 Ti fully supports bfloat16
+                )
+
+            # Add Flash Attention 2 support for Qwen models
+            flash_kwargs = self.perf_optimizer.enable_flash_attention(self.config.model)
+            model_kwargs.update(flash_kwargs)
+
+            # Set dtype (prefer bfloat16 for RTX 50 series)
+            if self.config.torch_dtype == "auto":
+                if torch.cuda.is_available() and torch.cuda.is_bf16_supported():
+                    model_kwargs["torch_dtype"] = torch.bfloat16
+                    self.logger.info("Using bfloat16 dtype for RTX 50 series")
+                else:
+                    model_kwargs["torch_dtype"] = torch.float16
+            else:
+                model_kwargs["torch_dtype"] = getattr(torch, self.config.torch_dtype, torch.float16)
 
             # Load model
             self.model = AutoModelForCausalLM.from_pretrained(
@@ -122,7 +150,27 @@ class LLMInterface:
                 **model_kwargs
             )
 
-            self.logger.info(f"Successfully loaded {self.config.model}")
+            # Apply torch.compile() for PyTorch 2.0+ optimization
+            if self.config.use_gpu and hasattr(torch, 'compile'):
+                try:
+                    self.logger.info("Compiling model with torch.compile() for optimization...")
+                    # Use 'reduce-overhead' mode for better latency
+                    self.model = torch.compile(
+                        self.model,
+                        mode="reduce-overhead",
+                        fullgraph=True
+                    )
+                    self.perf_optimizer.optimizations_applied.append("torch.compile")
+                    self.logger.info("✓ Model compiled with torch.compile()")
+                except Exception as e:
+                    self.logger.warning(f"torch.compile() failed, continuing without: {e}")
+
+            # Print memory usage after loading
+            if self.config.use_gpu:
+                mem_info = self.perf_optimizer.get_gpu_memory_info()
+                self.logger.info(f"GPU Memory after model load: {mem_info['allocated_gb']:.1f}GB / {mem_info['total_gb']:.1f}GB")
+
+            self.logger.info(f"Successfully loaded {self.config.model} with optimizations: {self.perf_optimizer.get_summary()}")
 
         except Exception as e:
             raise ModelLoadError(f"Failed to load model {self.config.model}: {e}")
@@ -468,7 +516,8 @@ class LLMInterface:
     def batch_generate(self, prompts: List[str], temperature: float,
                       sim_id: str = "") -> List[str]:
         """
-        Generate responses for multiple prompts.
+        Generate responses for multiple prompts using true batching.
+        Processes multiple prompts in parallel for significant speedup.
 
         Args:
             prompts: List of prompts
@@ -478,16 +527,143 @@ class LLMInterface:
         Returns:
             List of generated responses
         """
-        responses = []
+        if not prompts:
+            return []
 
+        # Fall back to sequential if only one prompt
+        if len(prompts) == 1:
+            return [self.generate(prompts[0], temperature, sim_id)]
+
+        try:
+            return self._batch_generate_optimized(prompts, temperature, sim_id)
+        except Exception as e:
+            # Fall back to sequential generation if batch fails
+            self.logger.warning(f"Batch generation failed, falling back to sequential: {e}")
+            return self._batch_generate_sequential(prompts, temperature, sim_id)
+
+    def _batch_generate_optimized(self, prompts: List[str], temperature: float, sim_id: str) -> List[str]:
+        """
+        Optimized batch generation using proper padding and batching.
+
+        Args:
+            prompts: List of prompts
+            temperature: Temperature setting
+            sim_id: Simulation ID
+
+        Returns:
+            List of generated responses
+        """
+        start_time = time.time()
+
+        # Check memory before batching
+        if self.config.use_gpu:
+            mem_info = self.perf_optimizer.get_gpu_memory_info()
+            if mem_info["free_gb"] < 2.0:  # Less than 2GB free
+                self.logger.warning(f"Low GPU memory ({mem_info['free_gb']:.1f}GB free), reducing batch size")
+                # Process in smaller batches
+                batch_size = max(1, len(prompts) // 2)
+                results = []
+                for i in range(0, len(prompts), batch_size):
+                    batch = prompts[i:i + batch_size]
+                    results.extend(self._batch_generate_optimized(batch, temperature, f"{sim_id}_sub{i}"))
+                return results
+
+        # Tokenize all prompts with padding
+        self.llm_logger.debug(f"[{sim_id}] Batching {len(prompts)} prompts")
+
+        # Use left padding for decoder-only models (important for generation)
+        old_padding_side = self.tokenizer.padding_side
+        self.tokenizer.padding_side = "left"
+
+        try:
+            # Tokenize with padding
+            inputs = self.tokenizer(
+                prompts,
+                return_tensors="pt",
+                padding=True,
+                truncation=True,
+                max_length=2048
+            )
+
+            # Move to device
+            if self.config.use_gpu and hasattr(self.model, 'device'):
+                inputs = {k: v.to(self.model.device) for k, v in inputs.items()}
+
+            # Generate for all prompts at once
+            with torch.no_grad():
+                gen_kwargs = {
+                    **inputs,
+                    "max_new_tokens": self.config.max_tokens,
+                    "pad_token_id": self.tokenizer.pad_token_id or self.tokenizer.eos_token_id,
+                    "eos_token_id": self.tokenizer.eos_token_id
+                }
+
+                if temperature > 0:
+                    gen_kwargs.update({
+                        "do_sample": True,
+                        "temperature": temperature,
+                        "top_p": 0.95
+                    })
+                else:
+                    gen_kwargs["do_sample"] = False
+
+                # Generate
+                outputs = self.model.generate(**gen_kwargs)
+
+            # Decode all outputs
+            responses = []
+            for i, output in enumerate(outputs):
+                # Get only the generated tokens (skip the input)
+                input_length = inputs['input_ids'][i].shape[0]
+                generated_ids = output[input_length:]
+
+                # Decode
+                generated_text = self.tokenizer.decode(generated_ids, skip_special_tokens=True)
+
+                # Clean the response
+                generated_text = self._clean_response(generated_text)
+
+                # Validate
+                if self._is_degenerate_response(generated_text):
+                    self.logger.warning(f"[{sim_id}] Degenerate response for prompt {i}, regenerating individually")
+                    # Fall back to individual generation for this prompt
+                    generated_text = self.generate(prompts[i], temperature, f"{sim_id}_regen_{i}")
+
+                responses.append(generated_text)
+
+            elapsed = time.time() - start_time
+            self.llm_logger.info(f"[{sim_id}] Batch of {len(prompts)} completed in {elapsed:.2f}s ({elapsed/len(prompts):.2f}s per prompt)")
+
+            # Update stats
+            self.stats["successful_calls"] += len(prompts)
+            self.stats["total_time"] += elapsed
+
+            return responses
+
+        finally:
+            # Restore original padding side
+            self.tokenizer.padding_side = old_padding_side
+
+    def _batch_generate_sequential(self, prompts: List[str], temperature: float, sim_id: str) -> List[str]:
+        """
+        Sequential generation fallback.
+
+        Args:
+            prompts: List of prompts
+            temperature: Temperature setting
+            sim_id: Simulation ID
+
+        Returns:
+            List of generated responses
+        """
+        responses = []
         for i, prompt in enumerate(prompts):
             try:
-                response = self.generate(prompt, temperature, f"{sim_id}_batch_{i}")
+                response = self.generate(prompt, temperature, f"{sim_id}_seq_{i}")
                 responses.append(response)
             except LLMGenerationError as e:
-                self.error_logger.error(f"[{sim_id}] Batch generation failed at index {i}: {e}")
+                self.error_logger.error(f"[{sim_id}] Sequential generation failed at index {i}: {e}")
                 responses.append("")  # Add empty response to maintain alignment
-
         return responses
 
     def get_stats(self) -> Dict[str, Any]:
