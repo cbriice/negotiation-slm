@@ -112,13 +112,11 @@ class LLMInterface:
                 device_map = self.perf_optimizer.optimize_device_map(model_size_gb=7.0)
 
                 # Handle device mapping - "cuda:0" means full GPU, others are device_map strategies
+                # Always use device_map for device placement
+                model_kwargs["device_map"] = device_map
                 if device_map.startswith("cuda:"):
-                    # Full GPU loading - use device parameter instead of device_map
-                    model_kwargs["device"] = device_map
                     self.logger.info(f"Loading entire model on {device_map}")
                 else:
-                    # Use device_map for auto/balanced strategies
-                    model_kwargs["device_map"] = device_map
                     self.logger.info(f"Using device_map strategy: {device_map}")
             else:
                 model_kwargs["device_map"] = None

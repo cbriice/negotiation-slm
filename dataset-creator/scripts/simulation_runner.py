@@ -40,7 +40,8 @@ class SimulationRunner:
                  seed_category: Optional[str] = None,
                  seed_selection_method: str = "random",
                  specific_seed_file: Optional[str] = None,
-                 same_personality_count: int = 0):
+                 same_personality_count: int = 0,
+                 persistence_only: bool = False):
         """
         Initialize simulation runner with all required components.
 
@@ -52,6 +53,7 @@ class SimulationRunner:
             seed_selection_method: How to select seeds ("random", "sequential", "all")
             specific_seed_file: Optional specific seed file to load instead of directory
             same_personality_count: Number of runs to use same personality (0=never, -1=always)
+            persistence_only: Only track negotiations where persistence check was passed
         """
         # Initialize logger
         self.logger = get_logger()
@@ -63,6 +65,8 @@ class SimulationRunner:
         if same_personality_count != 0:
             same_pers_msg = "all runs" if same_personality_count == -1 else f"{same_personality_count} runs"
             self.logger.sim_logger.info(f"  - Same personality mode: {same_pers_msg}")
+        if persistence_only:
+            self.logger.sim_logger.info(f"  - Persistence-only mode: ENABLED (only tracking negotiations with persistence check passed)")
         self.logger.sim_logger.info(f"  - Seed directory: {seed_directory}")
         self.logger.sim_logger.info(f"  - Seed category: {seed_category}")
         self.logger.sim_logger.info(f"  - Seed selection: {seed_selection_method}")
@@ -105,6 +109,7 @@ class SimulationRunner:
         self.seed_index = 0  # For sequential selection
         self.same_personality_count = same_personality_count
         self.same_personality_runs_done = 0  # Track how many same-personality runs completed
+        self.persistence_only = persistence_only
 
         # Initialize control function with default params
         self.logger.sim_logger.info("Initializing control function...")
@@ -211,7 +216,8 @@ class SimulationRunner:
             "buyer_favorable": False,
             "seller_favorable": False,
             "outcome": None,
-            "final_price": None
+            "final_price": None,
+            "persistence_check_passed": False  # Track if persistence check was passed
         }
 
     def get_next_seed(self) -> Optional[NegotiationSeed]:
@@ -446,13 +452,26 @@ class SimulationRunner:
 
             # Log outcome
             self.logger.log_simulation_end(sim_id, result, negotiation_duration)
-            results.append(result)
 
-            # Store completed negotiation
-            self.completed_negotiations.append(result)
+            # Filter based on persistence_only mode
+            if self.persistence_only:
+                # Only include negotiations where persistence check was passed
+                if result.get("persistence_check_passed", False):
+                    results.append(result)
+                    self.completed_negotiations.append(result)
+                    print(f"✓ Negotiation {i+1} included (persistence check passed)")
+                else:
+                    print(f"✗ Negotiation {i+1} excluded (no persistence check or failed)")
+            else:
+                # Include all negotiations normally
+                results.append(result)
+                self.completed_negotiations.append(result)
 
         total_duration = time.time() - start_time
-        self.logger.sim_logger.info(f"Simulation run complete. Total time: {total_duration:.2f}s, Average: {total_duration/len(results):.2f}s per negotiation")
+        if len(results) > 0:
+            self.logger.sim_logger.info(f"Simulation run complete. Total time: {total_duration:.2f}s, Average: {total_duration/len(results):.2f}s per negotiation")
+        else:
+            self.logger.sim_logger.info(f"Simulation run complete. Total time: {total_duration:.2f}s, No negotiations collected (all filtered out)")
 
         return results
 
@@ -572,6 +591,18 @@ class SimulationRunner:
                     self.logger.sim_logger.info(f"[{sim_id}] Turn {turn}: Forced response - CLARIFY_RESPOND")
                     forced_response = None
 
+                elif forced_response == "persistence_response":
+                    action = "persistence_response"
+                    # Use the special persistence prompts from prompts_unified.py
+                    if is_buyer_turn:
+                        # Buyer is persisting after seller tried to reject
+                        prompt = self.prompt_manager.general_prompts.buyer_persistence_prompt
+                    else:
+                        # Seller is persisting after buyer tried to reject
+                        prompt = self.prompt_manager.general_prompts.seller_persistence_prompt
+                    self.logger.sim_logger.info(f"[{sim_id}] Turn {turn}: Forced response - PERSISTENCE_RESPONSE")
+                    forced_response = None
+
                 else:
                     # Normal control function action selection
                     action, prompt, control_features = self._select_action_and_prompt(
@@ -627,8 +658,10 @@ class SimulationRunner:
                         )
                         print(f"{rejecting_party} rejected at ${state.P_k}, but negotiation continues (persistence check passed)")
                         has_had_rejection = True
-                        # Clear any forced response to allow negotiation to continue naturally
-                        forced_response = None
+                        # Mark that persistence check was passed
+                        packet["persistence_check_passed"] = True
+                        # Set forced response to use persistence prompt
+                        forced_response = "persistence_response"
                         # Continue negotiation - don't break
                     else:
                         # Other party doesn't persist - negotiation ends
@@ -943,12 +976,18 @@ class SimulationRunner:
             "model": self.llm_interface.config.model,
             "seed_category": self.seed_category,
             "seed_selection_method": self.seed_selection_method,
+            "persistence_only": self.persistence_only,
             "deals_completed": sum(1 for n in self.completed_negotiations if n.get("deal_closed")),
             "deals_failed": sum(1 for n in self.completed_negotiations if not n.get("deal_closed")),
             "personality_pairs_per_seed": {
                 str(seed_id): list(pairs) for seed_id, pairs in self.seed_personality_pairs.items()
             }
         }
+
+        # Add persistence statistics if in persistence-only mode
+        if self.persistence_only:
+            metadata["persistence_check_passed_count"] = sum(1 for n in self.completed_negotiations if n.get("persistence_check_passed", False))
+            metadata["persistence_filtering"] = "ENABLED - Only negotiations with persistence check passed are included"
 
         self.logger.sim_logger.info(f"Run statistics - Total: {metadata['total_negotiations']}, Deals: {metadata['deals_completed']}, No-deals: {metadata['deals_failed']}")
 
@@ -1171,6 +1210,8 @@ def main():
                        help="Model name for LLM (default: Qwen/Qwen2.5-14B-Instruct)")
     parser.add_argument("--same-personality", type=int, nargs='?', const=-1, default=0,
                        help="Force same personality for buyer and seller. Optionally specify number of runs (default: all runs if flag is used)")
+    parser.add_argument("--persistence-only", action="store_true",
+                       help="Only track negotiations where persistence check was passed")
 
     # Output configuration
     parser.add_argument("--output-dir", type=str, default=None,
@@ -1205,7 +1246,8 @@ def main():
         seed_category=args.seed_category,
         seed_selection_method=args.seed_selection,
         specific_seed_file=specific_seed_file,
-        same_personality_count=args.same_personality
+        same_personality_count=args.same_personality,
+        persistence_only=args.persistence_only
     )
 
     # Handle specific seed selection
@@ -1238,6 +1280,8 @@ def main():
     if args.same_personality != 0:
         same_pers_msg = "all negotiations" if args.same_personality == -1 else f"first {args.same_personality} negotiations"
         print(f"  - Same personality mode: ENABLED for {same_pers_msg}")
+    if args.persistence_only:
+        print(f"  - Persistence-only mode: ENABLED (only tracking negotiations with persistence check passed)")
 
     results = runner.run_simulation(
         num_negotiations=args.num_negotiations,
@@ -1265,11 +1309,19 @@ def main():
     print("\nSimulation complete!")
     print(f"Generated {len(results)} negotiations in {runtime_string}")
 
+    # Print persistence-only mode statistics if applicable
+    if args.persistence_only:
+        persistence_count = sum(1 for r in results if r.get("persistence_check_passed", False))
+        print(f"Persistence checks passed: {persistence_count}/{len(results)} negotiations")
+
     # Print summary statistics
     deals_made = sum(1 for r in results if r.get("deal_closed"))
     print(f"Deals completed: {deals_made}/{len(results)}")
     logger.sim_logger.info(f"Final statistics - Deals: {deals_made}/{len(results)}")
-    print(f"Average time per negotiation: {runtime / len(results)} min")
+    if len(results) > 0:
+        print(f"Average time per negotiation: {runtime / len(results)} min")
+    else:
+        print(f"No negotiations collected (all filtered out)")
 
     if deals_made > 0:
         avg_price = sum(r.get("final_price", 0) for r in results if r.get("deal_closed")) / deals_made

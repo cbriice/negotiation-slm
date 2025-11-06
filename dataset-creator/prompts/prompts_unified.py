@@ -185,3 +185,7 @@ class GeneralPrompts:
     # opening dialog
     buyer_opener: str = "Greet the seller according to how your personality would."
     seller_opener: str = "Respond to the buyer's greeting according to how your personality would."
+
+    # persistence response. one party tried to walk away -> negotiation keeps going
+    buyer_persistence_prompt: str = "The seller just tried to walk away - convince them your offer is worth staying for."
+    seller_persistence_prompt: str = "The buyer just tried to walk away - convince them to reconsider your terms."
