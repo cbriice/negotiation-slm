@@ -17,7 +17,7 @@ import os
 
 # Configuration
 TARGET_PACKETS = 3000
-MIN_TOKENS = 300
+MIN_TOKENS = 100  # Lowered from 300 to capture more conversations
 MAX_TOKENS = 1000
 TARGET_AVG_TOKENS = 475  # Middle of 450-500 range
 CHARS_PER_TOKEN = 4  # Rough estimate

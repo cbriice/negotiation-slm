@@ -13,7 +13,7 @@ from tqdm import tqdm
 
 # Test configuration - very small sample
 TARGET_PACKETS = 10  # Very small for testing
-MIN_TOKENS = 300
+MIN_TOKENS = 100  # Lowered from 300 to match main script
 MAX_TOKENS = 1000
 CHARS_PER_TOKEN = 4
 
