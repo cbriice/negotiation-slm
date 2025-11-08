@@ -1,0 +1,12 @@
+---
+system:
+assistant_style:
+key_strategy:
+difficulty:
+difficulty_bin:
+---
+
+User/Assistant:
+Assistant/User:
+... # this is where conversation is unloaded from "messages" (everything besides "role": "system" which goes up top)
+# NOTE: everything besides Assistant fields gets -100 loss mask

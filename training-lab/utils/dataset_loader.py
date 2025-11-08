@@ -116,8 +116,15 @@ class UnifiedDatasetLoader:
         Returns:
             Formatted text string
         """
+        # Handle messages format (new negotiation dataset format)
+        if 'messages' in example:
+            from training.converters.messages_to_sft import MessagesToSFTConverter
+            converter = MessagesToSFTConverter(mask_non_assistant=True)
+            converted = converter.convert_packet(example)
+            return converted['text']
+
         # Handle dialogue format
-        if 'dialogue' in example:
+        elif 'dialogue' in example:
             formatted = ""
             for turn in example['dialogue']:
                 role = turn.get('role', 'user')

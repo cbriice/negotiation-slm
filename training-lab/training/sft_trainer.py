@@ -184,8 +184,21 @@ class SFTTrainingPipeline:
         if len(dataset) > 0:
             sample = dataset[0]
 
+            # Check for messages format (new negotiation dataset)
+            if 'messages' in sample:
+                logger.info("Detected messages format - converting to SFT format with response masking")
+                self.use_weighted_loss = False  # Messages format uses standard masking
+
+                # Log sample info
+                num_messages = len(sample.get('messages', []))
+                logger.info(f"Sample has {num_messages} messages")
+                if 'system' in sample:
+                    logger.debug(f"System info: {sample.get('system', {})}")
+                if 'meta' in sample:
+                    logger.debug(f"Meta info: {sample.get('meta', {})}")
+
             # Check for CraigslistBargain format (system, prompt, response)
-            if all(field in sample for field in ['system', 'prompt', 'response']):
+            elif all(field in sample for field in ['system', 'prompt', 'response']):
                 logger.info("Detected CraigslistBargain format - using weighted loss")
                 self.use_weighted_loss = True
 
