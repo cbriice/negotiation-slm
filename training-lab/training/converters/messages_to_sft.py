@@ -90,7 +90,6 @@ class MessagesToSFTConverter:
         # Process messages into dialogue format
         dialogue_text = []
         masking_regions = []  # Track which parts should be masked
-        current_position = 0
 
         # Extract system message if present
         system_message = None
@@ -114,8 +113,22 @@ class MessagesToSFTConverter:
             formatted_parts.append(f"System: {system_message}")
             formatted_parts.append("")
 
+        # Track masking for system region if masking is enabled
+        if self.mask_non_assistant:
+            # Calculate the length of the entire system section (header + system message)
+            system_section = '\n'.join(formatted_parts)
+            system_section_length = len(system_section)
+
+            # Add masking region for the entire system section
+            masking_regions.append({
+                'start': 0,
+                'end': system_section_length,
+                'mask': True,
+                'role': 'system'
+            })
+
         # Process conversation messages
-        for i, msg in enumerate(conversation_messages):
+        for msg in conversation_messages:
             # Handle dropout - safely get role and content
             role = msg.get('role', 'unknown')
             content = msg.get('content', '')
@@ -138,8 +151,10 @@ class MessagesToSFTConverter:
 
             # Track masking info if needed
             if self.mask_non_assistant:
-                start_pos = len('\n'.join(formatted_parts + dialogue_text[:-1]))
-                if start_pos > 0:
+                # Calculate position relative to the full formatted text
+                prefix = formatted_parts + dialogue_text[:-1]
+                start_pos = len('\n'.join(prefix))
+                if prefix:  # If there's content before this message
                     start_pos += 1  # Account for newline
 
                 end_pos = start_pos + len(message_line)
@@ -218,7 +233,9 @@ class MessagesToSFTConverter:
         self,
         input_path: str,
         output_path: Optional[str] = None,
-        validate: bool = True
+        validate: bool = True,
+        shuffle: bool = False,
+        seed: int = 42
     ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
         """
         Convert an entire JSONL file from messages format to SFT format.
@@ -227,15 +244,17 @@ class MessagesToSFTConverter:
             input_path: Path to input JSONL file with messages format
             output_path: Optional path to save converted JSONL file
             validate: Whether to validate the conversion
+            shuffle: Whether to shuffle the converted examples
+            seed: Random seed for shuffling
 
         Returns:
             Tuple of (converted examples, statistics)
         """
-        input_path = Path(input_path)
-        if not input_path.exists():
-            raise FileNotFoundError(f"Input file not found: {input_path}")
+        input_path_obj = Path(input_path)
+        if not input_path_obj.exists():
+            raise FileNotFoundError(f"Input file not found: {input_path_obj}")
 
-        logger.info(f"Converting {input_path} to SFT format...")
+        logger.info(f"Converting {input_path_obj} to SFT format...")
 
         converted_examples = []
         stats = {
@@ -250,7 +269,7 @@ class MessagesToSFTConverter:
         }
 
         # Read and convert each packet
-        with open(input_path, 'r') as f:
+        with open(input_path_obj, 'r') as f:
             for line_num, line in enumerate(f, 1):
                 line = line.strip()
                 if not line:
@@ -284,12 +303,19 @@ class MessagesToSFTConverter:
                     stats['failed_conversions'] += 1
                     stats['errors'].append(f"Line {line_num}: {str(e)}")
 
+        # Shuffle converted examples if requested
+        if shuffle:
+            import random
+            random.seed(seed)
+            random.shuffle(converted_examples)
+            logger.info(f"Shuffled {len(converted_examples)} examples with seed {seed}")
+
         # Save if output path provided
         if output_path:
-            output_path = Path(output_path)
-            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path_obj = Path(output_path)
+            output_path_obj.parent.mkdir(parents=True, exist_ok=True)
 
-            with open(output_path, 'w') as f:
+            with open(output_path_obj, 'w') as f:
                 for example in converted_examples:
                     # Save only essential fields to JSONL
                     output_data = {
@@ -301,7 +327,7 @@ class MessagesToSFTConverter:
 
                     f.write(json.dumps(output_data) + '\n')
 
-            logger.info(f"Saved {len(converted_examples)} converted examples to {output_path}")
+            logger.info(f"Saved {len(converted_examples)} converted examples to {output_path_obj}")
 
         # Log statistics
         self._log_statistics(stats)
@@ -384,7 +410,9 @@ class MessagesToSFTConverter:
     def convert_to_dataset(
         self,
         input_path: str,
-        max_seq_length: Optional[int] = None
+        max_seq_length: Optional[int] = None,
+        shuffle: bool = True,
+        seed: int = 42
     ) -> Dataset:
         """
         Convert JSONL file directly to HuggingFace Dataset.
@@ -392,11 +420,13 @@ class MessagesToSFTConverter:
         Args:
             input_path: Path to input JSONL file
             max_seq_length: Optional maximum sequence length for filtering
+            shuffle: Whether to shuffle the dataset (default: True)
+            seed: Random seed for shuffling (default: 42)
 
         Returns:
             HuggingFace Dataset ready for training
         """
-        converted_examples, stats = self.convert_file(input_path, validate=True)
+        converted_examples, _ = self.convert_file(input_path, validate=True)
 
         # Extract only the text field for dataset
         dataset_records = []
@@ -427,6 +457,11 @@ class MessagesToSFTConverter:
             filtered = original_size - len(dataset)
             if filtered > 0:
                 logger.info(f"Filtered {filtered} examples exceeding {max_seq_length} chars")
+
+        # Shuffle dataset if requested
+        if shuffle:
+            logger.info(f"Shuffling dataset with seed {seed}...")
+            dataset = dataset.shuffle(seed=seed)
 
         logger.info(f"Created dataset with {len(dataset)} examples")
         return dataset
@@ -464,11 +499,31 @@ def main():
         type=int,
         help="Only convert first N packets (for testing)"
     )
+    parser.add_argument(
+        '--shuffle',
+        action='store_true',
+        default=True,
+        help="Shuffle the dataset after conversion (default: True)"
+    )
+    parser.add_argument(
+        '--no-shuffle',
+        action='store_true',
+        help="Disable dataset shuffling"
+    )
+    parser.add_argument(
+        '--seed',
+        type=int,
+        default=42,
+        help="Random seed for shuffling (default: 42)"
+    )
 
     args = parser.parse_args()
 
     # Initialize converter
     converter = MessagesToSFTConverter(mask_non_assistant=not args.no_mask)
+
+    # Determine shuffle setting
+    should_shuffle = not args.no_shuffle
 
     # Handle sample mode
     if args.sample:
@@ -483,10 +538,12 @@ def main():
                 outf.write(line)
 
         # Convert the sample
-        converted, stats = converter.convert_file(
-            temp_file,
+        converted, _ = converter.convert_file(
+            str(temp_file),
             args.output,
-            validate=args.validate
+            validate=args.validate,
+            shuffle=should_shuffle,
+            seed=args.seed
         )
 
         # Show sample output
@@ -497,10 +554,12 @@ def main():
             print("=" * 60)
     else:
         # Convert full file
-        converted, stats = converter.convert_file(
+        converted, _ = converter.convert_file(
             args.input_file,
             args.output,
-            validate=args.validate
+            validate=args.validate,
+            shuffle=should_shuffle,
+            seed=args.seed
         )
 
         # Show sample if no output file specified
