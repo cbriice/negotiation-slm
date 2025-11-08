@@ -8,11 +8,14 @@ Mutation types:
 - remove_first_turn: Remove first conversation turn
 - remove_system_prompt: Remove system prompt
 - mutate_system_prompt: Change system prompt to variations
-- remove_assistant_style: Remove assistant_style field
-- remove_opponent_style: Remove opponent_style field
+- remove_assistant_style: Remove assistant_style field from system
+- remove_opponent_style: Remove opponent_style field from meta
+- remove_difficulty: Remove difficulty field from system
+- remove_difficulty_bin: Remove difficulty_bin field from system
+- remove_key_strategy: Remove key_strategy field from system
 
 Usage:
-    python mutate_sft_data.py --input data.jsonl --num-mutations 1000 --mutation-type remove_first_turn
+    python mutate_sft_data.py --input data.jsonl --num-mutations 1000 --mutation-type remove_difficulty
 """
 
 import argparse
@@ -35,6 +38,9 @@ class MutationType(Enum):
     MUTATE_SYSTEM_PROMPT = "mutate_system_prompt"
     REMOVE_ASSISTANT_STYLE = "remove_assistant_style"
     REMOVE_OPPONENT_STYLE = "remove_opponent_style"
+    REMOVE_DIFFICULTY = "remove_difficulty"
+    REMOVE_DIFFICULTY_BIN = "remove_difficulty_bin"
+    REMOVE_KEY_STRATEGY = "remove_key_strategy"
 
 
 class SFTMutator:
@@ -42,11 +48,15 @@ class SFTMutator:
 
     # System prompt variations
     SYSTEM_PROMPT_VARIATIONS = [
-        "You are an expert negotiator.",
-        "You are an expert negotiator",
+        "You are proficient at negotiation and deal-making.",
+        "You are negotiating.",
         "You're an expert negotiator.",
-        "You are a skilled negotiator.",
-        "You are a professional negotiator.",
+        "You serve as a skilled negotiator.",
+        "Assume the role of a good negotiator.",
+        "You are acting as a negotiation expert.",
+        "You are using negotiation skills to make a deal.",
+        "Act as a negotiator to make a deal.",
+        "You are negotiating for something."
     ]
 
     def __init__(self, seed: Optional[int] = None):
@@ -145,6 +155,53 @@ class SFTMutator:
         del mutated["meta"]["opponent_style"]
         return mutated
 
+    def remove_difficulty(self, packet: Dict) -> Optional[Dict]:
+        """Remove difficulty from system field.
+
+        If removing difficulty would result in both difficulty and
+        difficulty_bin being absent, only proceeds 50% of the time."""
+        if "difficulty" not in packet.get("system", {}):
+            return None
+
+        # Check if removing difficulty would leave packet without both difficulty fields
+        # If difficulty_bin is also missing (or would be missing), apply 50% chance
+        if "difficulty_bin" not in packet.get("system", {}):
+            # Both would be missing, 50% chance to proceed
+            if random.random() > 0.5:
+                return None
+
+        mutated = deepcopy(packet)
+        del mutated["system"]["difficulty"]
+        return mutated
+
+    def remove_difficulty_bin(self, packet: Dict) -> Optional[Dict]:
+        """Remove difficulty_bin from system field.
+
+        If removing difficulty_bin would result in both difficulty and
+        difficulty_bin being absent, only proceeds 50% of the time."""
+        if "difficulty_bin" not in packet.get("system", {}):
+            return None
+
+        # Check if removing difficulty_bin would leave packet without both difficulty fields
+        # If difficulty is also missing (or would be missing), apply 50% chance
+        if "difficulty" not in packet.get("system", {}):
+            # Both would be missing, 50% chance to proceed
+            if random.random() > 0.5:
+                return None
+
+        mutated = deepcopy(packet)
+        del mutated["system"]["difficulty_bin"]
+        return mutated
+
+    def remove_key_strategy(self, packet: Dict) -> Optional[Dict]:
+        """Remove key_strategy from system field."""
+        if "key_strategy" not in packet.get("system", {}):
+            return None
+
+        mutated = deepcopy(packet)
+        del mutated["system"]["key_strategy"]
+        return mutated
+
     def apply_mutation(self, packet: Dict, mutation_type: MutationType) -> Optional[Dict]:
         """Apply specified mutation to packet."""
         if mutation_type == MutationType.REMOVE_FIRST_TURN:
@@ -157,6 +214,12 @@ class SFTMutator:
             return self.remove_assistant_style(packet)
         elif mutation_type == MutationType.REMOVE_OPPONENT_STYLE:
             return self.remove_opponent_style(packet)
+        elif mutation_type == MutationType.REMOVE_DIFFICULTY:
+            return self.remove_difficulty(packet)
+        elif mutation_type == MutationType.REMOVE_DIFFICULTY_BIN:
+            return self.remove_difficulty_bin(packet)
+        elif mutation_type == MutationType.REMOVE_KEY_STRATEGY:
+            return self.remove_key_strategy(packet)
         else:
             raise ValueError(f"Unknown mutation type: {mutation_type}")
 
@@ -264,6 +327,13 @@ class SFTMutator:
             if not mutation_applied:
                 failed += 1
 
+        # Count packets with both difficulty fields removed
+        both_removed_count = 0
+        for packet in output_packets:
+            system = packet.get("system", {})
+            if "difficulty" not in system and "difficulty_bin" not in system:
+                both_removed_count += 1
+
         # Save output
         if not dry_run:
             print(f"\nSaving to {output_file}...")
@@ -282,6 +352,7 @@ class SFTMutator:
         print(f"Packets mutated:    {len(mutated_indices)}")
         print(f"Mutations applied:  {sum(mutation_counts.values())}")
         print(f"Mutations failed:   {failed}")
+        print(f"Both difficulty fields removed: {both_removed_count} packets")
         print(f"Random seed:        {self.seed}")
 
         if mutation_counts:
@@ -300,6 +371,7 @@ class SFTMutator:
             "packets_mutated": len(mutated_indices),
             "mutations_applied": sum(mutation_counts.values()),
             "mutations_failed": failed,
+            "both_difficulty_removed": both_removed_count,
             "seed": self.seed,
             "distribution": dict(mutation_counts)
         }
@@ -315,21 +387,24 @@ Mutation types:
   remove_first_turn       Remove first conversation turn
   remove_system_prompt    Remove system prompt
   mutate_system_prompt    Change system prompt to variations
-  remove_assistant_style  Remove assistant_style field
-  remove_opponent_style   Remove opponent_style field
+  remove_assistant_style  Remove assistant_style field from system
+  remove_opponent_style   Remove opponent_style field from meta
+  remove_difficulty       Remove difficulty field from system
+  remove_difficulty_bin   Remove difficulty_bin field from system
+  remove_key_strategy     Remove key_strategy field from system
 
 Examples:
   # Apply specific mutation to 1000 packets
-  python mutate_sft_data.py --input data.jsonl --num-mutations 1000 --mutation-type remove_first_turn
+  python mutate_sft_data.py --input data.jsonl --num-mutations 1000 --mutation-type remove_difficulty
 
-  # Apply random mutations
+  # Apply random mutations (including the new ones)
   python mutate_sft_data.py --input data.jsonl --num-mutations 500
 
   # Use specific seed for reproducibility
-  python mutate_sft_data.py --input data.jsonl --num-mutations 500 --mutation-type remove_system_prompt --seed 42
+  python mutate_sft_data.py --input data.jsonl --num-mutations 500 --mutation-type remove_key_strategy --seed 42
 
   # Dry run to preview
-  python mutate_sft_data.py --input data.jsonl --num-mutations 100 --mutation-type mutate_system_prompt --dry-run
+  python mutate_sft_data.py --input data.jsonl --num-mutations 100 --mutation-type remove_difficulty_bin --dry-run
         """
     )
 
@@ -340,7 +415,8 @@ Examples:
     parser.add_argument('--mutation-type', '-m',
                        choices=['remove_first_turn', 'remove_system_prompt',
                                'mutate_system_prompt', 'remove_assistant_style',
-                               'remove_opponent_style'],
+                               'remove_opponent_style', 'remove_difficulty',
+                               'remove_difficulty_bin', 'remove_key_strategy'],
                        help='Specific mutation type to apply (random if not specified)')
     parser.add_argument('--output', '-o',
                        help='Output file (default: auto-generated)')
