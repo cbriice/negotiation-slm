@@ -10,3 +10,4 @@ logs/errors/
 runs/
 .pytest_cache/
 logs/
+models/sft/error_logs/

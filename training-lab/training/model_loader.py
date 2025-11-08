@@ -82,7 +82,8 @@ class ModelLoader:
             tokenizer.pad_token_id = tokenizer.eos_token_id
             
         # Set padding side for training
-        tokenizer.padding_side = "right"
+        # Use left padding for Flash Attention compatibility with Mistral
+        tokenizer.padding_side = "left"
         
         return tokenizer
     

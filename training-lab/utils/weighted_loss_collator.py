@@ -125,21 +125,26 @@ class WeightedLossCollator:
                 response_content_start = response_text_start + len(response_marker)
                 response_start = self._find_token_position(offsets, response_content_start)
 
-            # Create labels and loss weights
-            labels = []
+            # Create labels and loss weights for autoregressive training
+            # labels[i] = input_ids[i+1] (predict next token)
+            labels = input_ids[1:] + [self.tokenizer.eos_token_id]
             loss_weights = []
-            for i, token_id in enumerate(input_ids):
-                if i < system_end:
+
+            # Apply weights based on position (shifted for labels)
+            for i in range(len(labels)):
+                # i-th label corresponds to predicting token at position i+1
+                # So we check position i+1 in the original sequence
+                if i + 1 < system_end:
                     # System prompt - completely masked
-                    labels.append(self.ignore_index)
+                    labels[i] = self.ignore_index
                     loss_weights.append(0.0)
-                elif i < response_start:
-                    # Prompt/context - apply reduced weight
-                    labels.append(token_id)
+                elif i + 1 < response_start:
+                    # Prompt/context - apply reduced weight but keep label
+                    # (label is already set from shift)
                     loss_weights.append(self.prompt_weight)
                 else:
                     # Response - full weight
-                    labels.append(token_id)
+                    # (label is already set from shift)
                     loss_weights.append(1.0)
 
             # Create attention mask
@@ -170,14 +175,15 @@ class WeightedLossCollator:
                 * self.pad_to_multiple_of
             )
 
-        # Pad all sequences
+        # Pad all sequences (left padding for Flash Attention compatibility)
         for i in range(len(batch_input_ids)):
             padding_length = max_batch_len - len(batch_input_ids[i])
             if padding_length > 0:
-                batch_input_ids[i] += [self.tokenizer.pad_token_id] * padding_length
-                batch_labels[i] += [self.ignore_index] * padding_length
-                batch_attention_mask[i] += [0] * padding_length
-                batch_loss_weights[i] += [0.0] * padding_length
+                # Left padding: add padding at the beginning
+                batch_input_ids[i] = [self.tokenizer.pad_token_id] * padding_length + batch_input_ids[i]
+                batch_labels[i] = [self.ignore_index] * padding_length + batch_labels[i]
+                batch_attention_mask[i] = [0] * padding_length + batch_attention_mask[i]
+                batch_loss_weights[i] = [0.0] * padding_length + batch_loss_weights[i]
 
         return {
             'input_ids': torch.tensor(batch_input_ids, dtype=torch.long),

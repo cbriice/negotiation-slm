@@ -3,7 +3,7 @@ from __future__ import annotations
 import torch
 
 # Global defaults
-MAX_SEQ_LEN: int = 4096
+MAX_SEQ_LEN: int = 2048
 PER_DEVICE_BATCH_SIZE: int = 1
 GRAD_ACCUM_STEPS: int = 8
 SEED: int = 42
@@ -18,7 +18,7 @@ BNB_4BIT_COMPUTE_DTYPE = torch.bfloat16
 BNB_4BIT_USE_DOUBLE_QUANT: bool = True
 
 # Batching
-PER_DEVICE_TRAIN_BATCH_SIZE = 3     # microbatch = 3
+PER_DEVICE_TRAIN_BATCH_SIZE = 4     # microbatch = 3
 GRADIENT_ACCUMULATION_STEPS = 4     # effective batch = 12
 PER_DEVICE_EVAL_BATCH_SIZE = 3
 
@@ -42,8 +42,8 @@ TARGET_MODULES = [
 ]
 """
 # LoRA config for baseline task training
-R: int = 16
-ALPHA: int = 32
+R: int = 32
+ALPHA: int = 64
 DROPOUT: float = 0.05
 TARGET_MODULES = ["q_proj", "k_proj", "v_proj", "o_proj"]
 
@@ -63,11 +63,11 @@ EVAL_STEPS = 100
 
 # SFT-specific
 SFT_MAX_STEPS: int = 1000
-# SFT_LR: float = 2e-4              # use this on more comprehensive datasets
-SFT_LR: float = 5e-5                # smaller for style-based baseline SFT runs
+SFT_LR: float = 1e-4              # use this on more comprehensive datasets
+# SFT_LR: float = 5e-5                # smaller for style-based baseline SFT runs
 SFT_WARMUP_RATIO: float = 0.03
 SFT_LR_SCHEDULER: str = "cosine"
-SFT_BASELINE_EPOCHS = 0.3                    # 0.3 epochs for baseline training
+SFT_BASELINE_EPOCHS = 1.25                    
 
 # DPO-specific
 DPO_MAX_STEPS: int = 1000

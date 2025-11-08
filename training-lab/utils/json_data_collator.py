@@ -91,9 +91,15 @@ class DataCollatorForJSON:
                     # Have to truncate output too
                     all_tokens = all_tokens[:self.max_length]
 
-            # Create labels (mask input, train on output)
-            labels = [self.ignore_index] * len(input_tokens) + output_tokens
-            labels = labels[:len(all_tokens)]  # Match length after truncation
+            # Create labels for autoregressive training (shifted left by 1)
+            # labels[i] = all_tokens[i+1] (predict next token)
+            labels = all_tokens[1:] + [self.tokenizer.eos_token_id]
+
+            # Mask the input portion (we only train on predicting output)
+            # Note: Since labels are shifted, position i predicts token i+1
+            # So we mask positions 0 to len(input_tokens)-2 (which predict input tokens)
+            for i in range(len(input_tokens) - 1):
+                labels[i] = self.ignore_index
 
             # Create attention mask
             attention_mask = [1] * len(all_tokens)
@@ -114,13 +120,14 @@ class DataCollatorForJSON:
                 * self.pad_to_multiple_of
             )
 
-        # Pad all sequences
+        # Pad all sequences (left padding for Flash Attention compatibility)
         for i in range(len(batch_input_ids)):
             padding_length = max_batch_len - len(batch_input_ids[i])
             if padding_length > 0:
-                batch_input_ids[i] += [self.tokenizer.pad_token_id] * padding_length
-                batch_labels[i] += [self.ignore_index] * padding_length
-                batch_attention_mask[i] += [0] * padding_length
+                # Left padding: add padding at the beginning
+                batch_input_ids[i] = [self.tokenizer.pad_token_id] * padding_length + batch_input_ids[i]
+                batch_labels[i] = [self.ignore_index] * padding_length + batch_labels[i]
+                batch_attention_mask[i] = [0] * padding_length + batch_attention_mask[i]
 
         # Convert to tensors
         return {

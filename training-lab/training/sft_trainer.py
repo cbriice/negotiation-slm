@@ -30,6 +30,7 @@ from training.metrics_tracker import TrainingMetricsTracker
 from utils.dataset_loader import UnifiedDatasetLoader
 from utils.json_data_collator import DataCollatorForJSON
 from utils.weighted_loss_collator import WeightedLossCollator, WeightedLossTrainer
+from utils.masking_regions_collator import DataCollatorForMaskingRegions
 import training_parameters as params
 
 # Import error handling modules
@@ -152,7 +153,9 @@ class SFTTrainingPipeline:
         # Data collator will be initialized after tokenizer is loaded
         self.json_collator = None
         self.weighted_collator = None
+        self.masking_regions_collator = None
         self.use_weighted_loss = False  # Will be set based on data format
+        self.use_masking_regions = False  # Will be set if masking_regions format detected
 
     def load_ndjson_dataset(self, file_path: str) -> Dataset:
         """
@@ -206,6 +209,19 @@ class SFTTrainingPipeline:
                 logger.debug(f"Sample system: {sample.get('system', '')[:100]}...")
                 logger.debug(f"Sample prompt: {sample.get('prompt', '')[:100]}...")
                 logger.debug(f"Sample response: {sample.get('response', '')[:100]}...")
+
+            # Check for masking_regions format (text, masking_regions)
+            elif 'text' in sample and 'masking_regions' in sample:
+                logger.info("Detected masking_regions format - using precise region-based masking")
+                self.use_masking_regions = True
+                self.use_weighted_loss = False
+
+                # Log sample info
+                num_regions = len(sample.get('masking_regions', []))
+                logger.info(f"Sample has {num_regions} masking regions")
+                logger.debug(f"Sample text preview: {sample.get('text', '')[:100]}...")
+                if 'meta' in sample:
+                    logger.debug(f"Meta info: {sample.get('meta', {})}")
 
             # Check for standard format (input, output)
             elif all(field in sample for field in ['input', 'output']):
@@ -358,7 +374,16 @@ class SFTTrainingPipeline:
             self.model.config.pad_token_id = self.tokenizer.pad_token_id
 
         # Initialize appropriate data collator
-        if hasattr(self, 'use_weighted_loss') and self.use_weighted_loss:
+        if hasattr(self, 'use_masking_regions') and self.use_masking_regions:
+            logger.info("Initializing masking regions collator...")
+            self.masking_regions_collator = DataCollatorForMaskingRegions(
+                tokenizer=self.tokenizer,
+                max_length=params.MAX_SEQ_LEN,
+                pad_to_multiple_of=params.PAD_TO_MULTIPLE,
+                ignore_index=params.MASKING_IGNORE_INDEX
+            )
+            logger.info("Masking regions collator initialized for precise region-based masking")
+        elif hasattr(self, 'use_weighted_loss') and self.use_weighted_loss:
             logger.info("Initializing weighted loss collator for CraigslistBargain...")
             self.weighted_collator = WeightedLossCollator(
                 tokenizer=self.tokenizer,
@@ -466,7 +491,10 @@ class SFTTrainingPipeline:
         )
 
         # Select appropriate collator
-        if self.use_weighted_loss and self.weighted_collator:
+        if hasattr(self, 'use_masking_regions') and self.use_masking_regions and self.masking_regions_collator:
+            logger.info("Using masking regions collator for precise region-based masking...")
+            data_collator = self.masking_regions_collator
+        elif self.use_weighted_loss and self.weighted_collator:
             logger.info("Using weighted loss collator for CraigslistBargain data...")
             data_collator = self.weighted_collator
         else:
