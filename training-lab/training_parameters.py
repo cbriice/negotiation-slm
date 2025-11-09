@@ -18,7 +18,7 @@ BNB_4BIT_COMPUTE_DTYPE = torch.bfloat16
 BNB_4BIT_USE_DOUBLE_QUANT: bool = True
 
 # Batching
-PER_DEVICE_TRAIN_BATCH_SIZE = 4     # microbatch = 3
+PER_DEVICE_TRAIN_BATCH_SIZE = 4     # microbatch = 4
 GRADIENT_ACCUMULATION_STEPS = 4     # effective batch = 12
 PER_DEVICE_EVAL_BATCH_SIZE = 3
 
@@ -62,12 +62,12 @@ EVAL_STRATEGY: str = "steps"           # flip to "steps" if you add eval
 EVAL_STEPS = 100
 
 # SFT-specific
-SFT_MAX_STEPS: int = 1000
-SFT_LR: float = 1e-4              # use this on more comprehensive datasets
-# SFT_LR: float = 5e-5                # smaller for style-based baseline SFT runs
-SFT_WARMUP_RATIO: float = 0.03
+SFT_MAX_STEPS: int = 4000
+SFT_LR: float = 5e-5              # Sweet spot between too fast (1e-4) and too slow (2e-5)
+# SFT_LR: float = 2e-5                # Too slow for initial training
+SFT_WARMUP_RATIO: float = 0.03   # Back to 3% warmup = 120 steps only
 SFT_LR_SCHEDULER: str = "cosine"
-SFT_BASELINE_EPOCHS = 1.25                    
+SFT_BASELINE_EPOCHS = 2.0                    
 
 # DPO-specific
 DPO_MAX_STEPS: int = 1000

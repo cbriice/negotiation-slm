@@ -471,6 +471,7 @@ class SFTTrainingPipeline:
             bf16=params.BF16,
             fp16=not params.BF16,  # Use fp16 if bf16 is not available
             gradient_checkpointing=params.GRADIENT_CHECKPOINTING,
+            gradient_checkpointing_kwargs={"use_reentrant": False} if params.GRADIENT_CHECKPOINTING else None,
             logging_steps=params.LOGGING_STEPS,
             save_steps=params.SAVE_STEPS,
             save_strategy=params.SAVE_STRATEGY,

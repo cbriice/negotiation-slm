@@ -438,6 +438,7 @@ class DPOTrainingModule:
             lr_scheduler_type="linear",  # Linear decay for DPO
             bf16=params.BF16,
             gradient_checkpointing=params.GRADIENT_CHECKPOINTING,
+            gradient_checkpointing_kwargs={"use_reentrant": False} if params.GRADIENT_CHECKPOINTING else None,
             remove_unused_columns=False,
             # DPO-specific parameters
             beta=params.DPO_BETA,
