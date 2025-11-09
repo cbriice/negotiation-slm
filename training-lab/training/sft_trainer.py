@@ -200,9 +200,9 @@ class SFTTrainingPipeline:
                 if 'meta' in sample:
                     logger.debug(f"Meta info: {sample.get('meta', {})}")
 
-            # Check for CraigslistBargain format (system, prompt, response)
+            # Check for weighted loss format (system, prompt, response)
             elif all(field in sample for field in ['system', 'prompt', 'response']):
-                logger.info("Detected CraigslistBargain format - using weighted loss")
+                logger.info("Detected weighted loss format (system/prompt/response) - using weighted loss")
                 self.use_weighted_loss = True
 
                 # Log sample
@@ -384,7 +384,7 @@ class SFTTrainingPipeline:
             )
             logger.info("Masking regions collator initialized for precise region-based masking")
         elif hasattr(self, 'use_weighted_loss') and self.use_weighted_loss:
-            logger.info("Initializing weighted loss collator for CraigslistBargain...")
+            logger.info("Initializing weighted loss collator...")
             self.weighted_collator = WeightedLossCollator(
                 tokenizer=self.tokenizer,
                 max_length=params.MAX_SEQ_LEN,
@@ -496,7 +496,7 @@ class SFTTrainingPipeline:
             logger.info("Using masking regions collator for precise region-based masking...")
             data_collator = self.masking_regions_collator
         elif self.use_weighted_loss and self.weighted_collator:
-            logger.info("Using weighted loss collator for CraigslistBargain data...")
+            logger.info("Using weighted loss collator...")
             data_collator = self.weighted_collator
         else:
             logger.info("Using JSON data collator for input/output masking...")

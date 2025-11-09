@@ -1,6 +1,6 @@
 """
-Weighted loss data collator for CraigslistBargain SFT training.
-Implements weighted loss computation: 0.1-0.2x on prompt, 1x on response.
+Weighted loss data collator for SFT training.
+Implements weighted loss computation: configurable weight on prompt/context, full weight on response.
 System prompts are completely masked.
 """
 
@@ -16,17 +16,17 @@ class WeightedLossCollator:
     """
     Data collator that applies weighted loss for different parts of the input.
 
-    Expects data in CraigslistBargain SFT format:
+    Expects data in SFT format with fields:
     {
-        "id": "conv_id_role_turn",
-        "system": "Item: X | Category: Y | Price: Z | Your role: buyer/seller",
-        "prompt": "Previous conversation history",
-        "response": "Agent's response"
+        "id": "unique_identifier",
+        "system": "System instructions or context (optional)",
+        "prompt": "Input prompt or conversation history",
+        "response": "Target response to generate"
     }
 
     Loss weights:
     - System: 0.0 (masked completely)
-    - Prompt: 0.15x weight (configurable via prompt_weight)
+    - Prompt: configurable via prompt_weight parameter (default 0.15)
     - Response: 1.0x weight
 
     The collator returns loss_weights tensor that the custom trainer

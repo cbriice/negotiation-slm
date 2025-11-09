@@ -8,7 +8,7 @@ import logging
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
-from training.converters.builtin_export import BuiltinTaskExporter
+# Legacy import removed: from training.converters.builtin_export import BuiltinTaskExporter
 from utils.episode_logger import EpisodeLogger, TrainingStage
 from utils.protocol_validator import calculate_protocol_score, select_dpo_pairs
 
@@ -45,9 +45,8 @@ class DataConverter:
         
         # Initialize episode logger as the single source of truth for data handling
         self.episode_logger = EpisodeLogger(base_dir=str(self.output_dir), batch_size=1000)
-        
-        # Keep builtin exporter for ParlAI task compatibility
-        self.builtin_exporter = BuiltinTaskExporter(str(self.output_dir / "builtin"))
+
+        # Legacy builtin_exporter removed - using custom baseline SFT dataset
     
     def convert_episodes_to_sft(self,
                                episodes_file: str,
@@ -150,49 +149,8 @@ class DataConverter:
         logger.info(f"Generated {len(dpo_packets)} DPO pairs from {len(episodes)} episodes")
         return output_file
     
-    def export_builtin_tasks(self,
-                            tasks: Optional[List[str]] = None,
-                            max_episodes: int = 1000,
-                            convert_to_sft: bool = True) -> Dict[str, str]:
-        """
-        Export and convert built-in ParlAI tasks.
-        
-        Args:
-            tasks: List of task names (default: ['dealnodeal', 'casino'])
-            max_episodes: Max episodes per task
-            convert_to_sft: Whether to also convert to SFT format
-            
-        Returns:
-            Dict mapping task names to output files
-        """
-        if tasks is None:
-            tasks = ['dealnodeal', 'casino']
-        
-        # Export tasks using builtin exporter
-        episode_files = self.builtin_exporter.export_all_tasks(
-            tasks, max_episodes
-        )
-        
-        # Convert to SFT if requested using EpisodeLogger
-        if convert_to_sft:
-            sft_files = {}
-            for task_name, episode_file in episode_files.items():
-                # Load episodes
-                episodes = self.episode_logger.load_episodes(episode_file)
-                
-                # Transform to SFT
-                sft_packets = self.episode_logger.batch_transform_to_sft(episodes)
-                
-                # Write SFT file
-                sft_file = str(self.output_dir / "builtin" / f"{task_name}_sft.jsonl")
-                self.episode_logger.write_episodes(sft_packets, sft_file, format='raw')
-                
-                sft_files[f"{task_name}_sft"] = sft_file
-            
-            # Merge results
-            episode_files.update(sft_files)
-        
-        return episode_files
+    # Legacy method removed - using custom baseline SFT dataset
+    # def export_builtin_tasks(...) was here - removed support for dealnodeal/casino tasks
     
     def score_episodes(self,
                       episodes_file: str,

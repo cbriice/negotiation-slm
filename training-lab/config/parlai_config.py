@@ -48,20 +48,8 @@ DIALOGPARTNER_CONFIG = {
     'enable_termination': True,  # RuleAgent can terminate on violations
 }
 
-BUILTIN_TASKS_CONFIG = {
-    'dealnodeal': {
-        'task': 'parlai.tasks.dealnodeal.agents:SystemTeacher',
-        'datatype': 'train',
-        'max_examples': -1,  # Use all available
-        'export_format': 'sft',
-    },
-    'casino': {
-        'task': 'parlai.tasks.casino.agents:SystemTeacher',
-        'datatype': 'train', 
-        'max_examples': -1,
-        'export_format': 'sft',
-    },
-}
+# Legacy builtin tasks config removed - using custom baseline SFT dataset
+# BUILTIN_TASKS_CONFIG = {}
 
 def get_parlai_opts(stage: str = 'baseline', **overrides) -> Dict[str, Any]:
     """Get ParlAI options for a specific training stage."""
@@ -71,8 +59,7 @@ def get_parlai_opts(stage: str = 'baseline', **overrides) -> Dict[str, Any]:
         opts.update(SELFCHAT_CONFIG)
     elif stage == 'dialogpartner':
         opts.update(DIALOGPARTNER_CONFIG)
-    elif stage == 'builtin':
-        opts['builtin_tasks'] = BUILTIN_TASKS_CONFIG
+    # Removed builtin stage - using custom baseline SFT dataset
     
     # Apply any overrides
     opts.update(overrides)
