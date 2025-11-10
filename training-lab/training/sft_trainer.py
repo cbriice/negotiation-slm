@@ -762,7 +762,15 @@ class SFTTrainingPipeline:
                             data_collator=data_collator,  # Use the JSON collator
                             # No formatting_func or dataset_text_field
                         )
-                    train_result = trainer.train()
+                    # Check for existing checkpoints to resume from
+                    import glob
+                    checkpoint_dirs = glob.glob(str(output_dir / "checkpoint-*"))
+                    if checkpoint_dirs:
+                        latest_checkpoint = max(checkpoint_dirs, key=lambda x: int(x.split("-")[-1]))
+                        logger.info(f"Resuming training from checkpoint: {latest_checkpoint}")
+                        train_result = trainer.train(resume_from_checkpoint=latest_checkpoint)
+                    else:
+                        train_result = trainer.train()
                 else:
                     raise RuntimeError("Training failed and recovery was not possible")
 

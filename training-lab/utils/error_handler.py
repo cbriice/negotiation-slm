@@ -380,7 +380,13 @@ class ErrorHandler:
                             self.logger.error(f"Recovery failed: {recovery_error}")
 
                 # Default recovery based on error type
-                if "cuda" in str(e).lower() or "out of memory" in str(e).lower():
+                # Be more specific about OOM detection - checkpoint errors are not OOM
+                error_str = str(e).lower()
+                is_oom = ("out of memory" in error_str or
+                         ("cuda" in error_str and "memory" in error_str and
+                          "checkpoint" not in error_str))
+
+                if is_oom:
                     recovery_actions = self.handle_oom_error(e, context or {})
                     if recovery_actions.get("clear_cache"):
                         # Retry after clearing cache
