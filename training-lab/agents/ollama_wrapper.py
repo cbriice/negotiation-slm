@@ -189,8 +189,8 @@ class OllamaNegotiator(NegotiatorBase):
             else:
                 max_memory = None
 
-            # Load base model with quantization and Flash Attention 2
-            logger.info("Loading base model with Flash Attention 2...")
+            # Load base model with quantization and SDPA attention
+            logger.info("Loading base model with PyTorch SDPA attention...")
             logger.debug(f"[_load_hf_model] Loading from: {self.model_name}")
             logger.debug(f"[_load_hf_model] Device map: auto, Max memory: {max_memory}")
             self.model = AutoModelForCausalLM.from_pretrained(
@@ -200,14 +200,14 @@ class OllamaNegotiator(NegotiatorBase):
                 max_memory=max_memory,
                 trust_remote_code=True,
                 torch_dtype=torch.bfloat16,
-                attn_implementation="flash_attention_2",  # Enable Flash Attention 2
+                attn_implementation="sdpa",  # Use PyTorch SDPA instead of FA2 for stability
             )
 
-            # Verify Flash Attention 2 is active on base model
+            # Verify attention implementation
             if hasattr(self.model, 'config') and hasattr(self.model.config, '_attn_implementation'):
                 logger.info(f"✓ Base model loaded with attention: '{self.model.config._attn_implementation}'")
             else:
-                logger.info("Base model loaded (FA2 status cannot be verified from config)")
+                logger.info("Base model loaded (attention status cannot be verified from config)")
 
             # Load LoRA adapter if provided
             if self.adapter_path:
@@ -221,8 +221,8 @@ class OllamaNegotiator(NegotiatorBase):
                     )
                     logger.info("LoRA adapter loaded successfully")
 
-                    # Verify Flash Attention persists through PEFT
-                    logger.info("Verifying Flash Attention 2 configuration after PEFT loading...")
+                    # Verify attention implementation persists through PEFT
+                    logger.info("Verifying attention configuration after PEFT loading...")
 
                     # Try to find the config in the PEFT model structure
                     config = None
@@ -232,11 +232,7 @@ class OllamaNegotiator(NegotiatorBase):
                         config = self.model.base_model.config
 
                     if config and hasattr(config, '_attn_implementation'):
-                        logger.info(f"✓ FA2 Status: Attention implementation = '{config._attn_implementation}'")
-                        if config._attn_implementation == "flash_attention_2":
-                            logger.info("✓ Flash Attention 2 is ACTIVE after PEFT loading")
-                        else:
-                            logger.warning(f"⚠ Flash Attention 2 NOT active. Current: {config._attn_implementation}")
+                        logger.info(f"✓ Attention implementation = '{config._attn_implementation}'")
                     else:
                         logger.warning("⚠ Could not verify attention implementation after PEFT loading")
                 else:

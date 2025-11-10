@@ -12,3 +12,4 @@ runs/
 logs/
 models/sft/error_logs/
 models/
+archive/

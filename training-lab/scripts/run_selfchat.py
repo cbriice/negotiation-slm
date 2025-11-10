@@ -75,13 +75,20 @@ class SelfChatRunner(ParlaiScript):
             '--adapter-path',
             type=str,
             default=None,
+            help='Path to LoRA adapter checkpoint (deprecated, use --model-checkpoint)'
+        )
+
+        parser.add_argument(
+            '--model-checkpoint',
+            type=str,
+            default=None,
             help='Path to LoRA adapter checkpoint'
         )
 
         parser.add_argument(
             '--use-latest-checkpoint',
             action='store_true',
-            default=True,
+            default=False,  # Changed to False - only auto-load if explicitly requested
             help='Automatically load the latest adapter checkpoint'
         )
         
@@ -105,6 +112,13 @@ class SelfChatRunner(ParlaiScript):
             help='Enable two-part response generation (strategy then response). Accepts: true/false, 1/0, yes/no'
         )
 
+        parser.add_argument(
+            '--seed-file',
+            type=str,
+            default='state_seeds.jsonl',
+            help='Seed file to use for negotiations (relative to output-dir or absolute path)'
+        )
+
         return parser
     
     def run(self):
@@ -114,6 +128,10 @@ class SelfChatRunner(ParlaiScript):
         # Ensure task is set for ParlAI World
         if 'task' not in opt:
             opt['task'] = 'selfplay'
+
+        # Unify model-checkpoint and adapter-path (prefer model-checkpoint)
+        if opt.get('model_checkpoint'):
+            opt['adapter_path'] = opt['model_checkpoint']
 
         # Auto-load latest checkpoint if requested and no adapter path provided
         if opt.get('use_latest_checkpoint') and not opt.get('adapter_path'):
