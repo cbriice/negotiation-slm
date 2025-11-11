@@ -88,6 +88,7 @@ def main():
         dataloader_drop_last=True,
         dataloader_num_workers=0,  # Single-threaded (multiprocessing issues with tokenizer)
         dataloader_pin_memory=True,  # Pin memory for faster GPU transfer
+        ignore_data_skip=True,  # For IterableDataset resume - don't hang trying to skip samples
     )
 
     # Create dynamic iterable dataset that samples based on current phase
@@ -122,9 +123,7 @@ def main():
 
     if args.resume_from_checkpoint:
         logger.info(f"Resuming from checkpoint: {args.resume_from_checkpoint}")
-        # For IterableDataset, we must skip data skipping to avoid hanging
-        # The checkpoint already has the correct step counter and optimizer state
-        trainer.train(resume_from_checkpoint=args.resume_from_checkpoint, ignore_data_skip=True)
+        trainer.train(resume_from_checkpoint=args.resume_from_checkpoint)
     else:
         trainer.train()
 
