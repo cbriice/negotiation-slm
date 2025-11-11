@@ -69,7 +69,11 @@ class CurriculumMaskingCollator:
         input_ids = example["input_ids"]
         text = example.get("text", self.tokenizer.decode(input_ids))
 
-        labels = input_ids.clone() if torch.is_tensor(input_ids) else torch.tensor(input_ids)
+        # Convert input_ids to tensor if it's a list
+        if not torch.is_tensor(input_ids):
+            input_ids = torch.tensor(input_ids, dtype=torch.long)
+
+        labels = input_ids.clone()
 
         # Find system section (between "---\nsystem:" and first "User:" or "Assistant:")
         system_pattern = r"---\s*\nsystem:.*?(?=(User:|Assistant:|$))"
@@ -88,7 +92,11 @@ class CurriculumMaskingCollator:
         input_ids = example["input_ids"]
         text = example.get("text", self.tokenizer.decode(input_ids))
 
-        labels = input_ids.clone() if torch.is_tensor(input_ids) else torch.tensor(input_ids)
+        # Convert input_ids to tensor if it's a list
+        if not torch.is_tensor(input_ids):
+            input_ids = torch.tensor(input_ids, dtype=torch.long)
+
+        labels = input_ids.clone()
 
         # Find all User: sections
         user_pattern = r"User:.*?(?=(Assistant:|User:|$))"
@@ -108,7 +116,11 @@ class CurriculumMaskingCollator:
         input_ids = example["input_ids"]
         text = example.get("text", self.tokenizer.decode(input_ids))
 
-        labels = torch.full_like(input_ids, self.ignore_index) if torch.is_tensor(input_ids) else torch.full((len(input_ids),), self.ignore_index)
+        # Convert input_ids to tensor if it's a list
+        if not torch.is_tensor(input_ids):
+            input_ids = torch.tensor(input_ids, dtype=torch.long)
+
+        labels = torch.full_like(input_ids, self.ignore_index)
 
         # Find all Assistant: sections
         assistant_pattern = r"Assistant:.*?(?=(User:|Assistant:|$))"
