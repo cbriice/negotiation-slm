@@ -85,35 +85,19 @@ def main():
         report_to=["tensorboard"] if not args.test_mode else [],
         remove_unused_columns=False,
         dataloader_drop_last=True,
+        dataloader_num_workers=0,  # Single-threaded (multiprocessing issues with tokenizer)
+        dataloader_pin_memory=True,  # Pin memory for faster GPU transfer
     )
 
-    # Create dataset
-    logger.info("Creating curriculum dataset...")
-    dataset_iterator = wrapper.get_dataset_iterator(
-        batch_size=args.batch_size * args.gradient_accumulation * 100,  # Prefetch batches
-        shuffle=True
+    # Create dynamic iterable dataset that samples based on current phase
+    logger.info("Creating dynamic curriculum dataset...")
+    from training.curriculum.dynamic_dataset import CurriculumIterableDataset
+
+    train_dataset = CurriculumIterableDataset(
+        wrapper=wrapper,
+        tokenizer=tokenizer,
+        max_seq_len=params.MAX_SEQ_LEN
     )
-
-    # Convert to dataset format and tokenize
-    from datasets import Dataset
-    epoch_data = next(dataset_iterator)
-
-    # Pre-tokenize the data
-    logger.info("Tokenizing dataset...")
-    for example in epoch_data:
-        if "input_ids" not in example:
-            text = example.get("text", "")
-            tokenized = tokenizer(
-                text,
-                truncation=True,
-                max_length=params.MAX_SEQ_LEN,
-                padding=False,
-                return_tensors=None
-            )
-            example["input_ids"] = tokenized["input_ids"]
-            example["attention_mask"] = tokenized["attention_mask"]
-
-    train_dataset = Dataset.from_list(epoch_data)
 
     # Create trainer with curriculum callback
     trainer = SFTTrainer(
@@ -121,7 +105,6 @@ def main():
         args=training_args,
         train_dataset=train_dataset,
         tokenizer=tokenizer,
-        dataset_text_field="text",
         data_collator=wrapper.get_data_collator(),
         callbacks=[CurriculumCallback(wrapper)],
         max_seq_length=params.MAX_SEQ_LEN,

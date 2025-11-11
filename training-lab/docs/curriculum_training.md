@@ -118,6 +118,12 @@ python test_curriculum_integration.py
 - Precision: BF16 with TF32
 - Gradient checkpointing enabled
 
+### Performance Optimizations
+- **Pre-computed labels**: Labels are computed once during dataset preparation instead of on-the-fly with regex
+- **Dynamic dataset refresh**: Dataset regenerates with correct ratios when phases transition
+- **Pinned memory**: DataLoader uses pinned memory for faster GPU transfers
+- **Skip initial validation**: Health checks skip step 0 to avoid slow model generation before training
+
 ## Troubleshooting
 
 ### Token Collapse Detected

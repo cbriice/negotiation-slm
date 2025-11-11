@@ -17,8 +17,31 @@ class CurriculumMaskingCollator:
         self.current_phase = phase
         self.masking_config = phase_config.get("masking", {})
 
+    def compute_labels(self, input_ids: list, text: str, source: str, masking_strategy: str) -> list:
+        """Compute labels for a given masking strategy (used for pre-computation)."""
+        example = {
+            "input_ids": input_ids,
+            "text": text,
+            "source": source
+        }
+
+        if masking_strategy == "none":
+            return input_ids.copy()
+        elif masking_strategy == "system_only":
+            return self._mask_system_only(example).tolist() if torch.is_tensor(self._mask_system_only(example)) else self._mask_system_only(example)
+        elif masking_strategy == "alternating":
+            return self._mask_alternating(example).tolist() if torch.is_tensor(self._mask_alternating(example)) else self._mask_alternating(example)
+        elif masking_strategy == "assistant_only":
+            return self._mask_non_assistant(example).tolist() if torch.is_tensor(self._mask_non_assistant(example)) else self._mask_non_assistant(example)
+        else:
+            return input_ids.copy()
+
     def mask_example(self, example: Dict[str, Any]) -> Dict[str, Any]:
         """Apply masking based on source and current phase."""
+        # Skip if labels are already pre-computed
+        if "labels" in example:
+            return example
+
         source = example.get("source", "unknown")
         masking_strategy = self.masking_config.get(source, "assistant_only")
 
@@ -108,6 +131,8 @@ class CurriculumMaskingCollator:
                 example["input_ids"] = torch.tensor(example["input_ids"])
             if "attention_mask" in example and not torch.is_tensor(example["attention_mask"]):
                 example["attention_mask"] = torch.tensor(example["attention_mask"])
+            if "labels" in example and not torch.is_tensor(example["labels"]):
+                example["labels"] = torch.tensor(example["labels"])
 
         # Apply masking
         for example in examples:

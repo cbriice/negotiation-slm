@@ -1,0 +1,64 @@
+"""Dynamic iterable dataset for curriculum training with phase-based sampling."""
+
+import torch
+from torch.utils.data import IterableDataset
+from typing import Dict, Any, Iterator
+import random
+
+
+class CurriculumIterableDataset(IterableDataset):
+    """Iterable dataset that dynamically samples based on curriculum phase."""
+
+    def __init__(self, wrapper, tokenizer, max_seq_len: int):
+        """
+        Initialize dynamic curriculum dataset.
+
+        Args:
+            wrapper: CurriculumTrainingWrapper instance
+            tokenizer: HuggingFace tokenizer
+            max_seq_len: Maximum sequence length
+        """
+        self.wrapper = wrapper
+        self.tokenizer = tokenizer
+        self.max_seq_len = max_seq_len
+
+    def __iter__(self) -> Iterator[Dict[str, Any]]:
+        """Generate examples dynamically based on current phase."""
+        while True:
+            # Sample batch based on current phase ratios
+            batch = self.wrapper.data_sampler.sample_batch(1)  # Sample 1 at a time
+
+            if not batch:
+                continue
+
+            example = batch[0]
+            text = example.get("text", "")
+            source = example.get("source", "unknown")
+
+            # Tokenize
+            tokenized = self.tokenizer(
+                text,
+                truncation=True,
+                max_length=self.max_seq_len,
+                padding=False,
+                return_tensors=None
+            )
+
+            # Pre-compute labels based on current phase
+            phase_config = self.wrapper.phase_config.phases[self.wrapper.current_phase]
+            masking_strategy = phase_config["masking"].get(source, "assistant_only")
+
+            labels = self.wrapper.masking_collator.compute_labels(
+                tokenized["input_ids"],
+                text,
+                source,
+                masking_strategy
+            )
+
+            yield {
+                "input_ids": tokenized["input_ids"],
+                "attention_mask": tokenized["attention_mask"],
+                "labels": labels,
+                "text": text,
+                "source": source
+            }
