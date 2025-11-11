@@ -1,0 +1,21 @@
+{
+    "basic_conversation": [
+        "Hello, how are you today?",
+        "What is 2+2?",
+        "Can you tell me about yourself?",
+        "What's the weather like?",
+        "Thank you for your help!"
+    ],
+    "negotiation": [
+        "I'd like to buy this item. What's your price?",
+        "Can you offer a better deal?",
+        "That seems expensive. Can we negotiate?",
+        "I'm interested but the price is too high.",
+        "What's your final offer?"
+    ],
+    "technical": [
+        "Explain how a computer works.",
+        "What is machine learning?",
+        "How do I write a Python function?"
+    ]
+}
