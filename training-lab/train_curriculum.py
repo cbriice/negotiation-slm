@@ -33,6 +33,7 @@ def main():
     parser.add_argument("--base-lr", type=float, default=1e-5)
     parser.add_argument("--disable-recovery", action="store_true", help="Disable automatic recovery")
     parser.add_argument("--test-mode", action="store_true", help="Run in test mode with minimal steps")
+    parser.add_argument("--resume-from-checkpoint", type=str, default=None, help="Resume from checkpoint directory")
 
     args = parser.parse_args()
 
@@ -119,7 +120,11 @@ def main():
     if args.test_mode:
         logger.info("TEST MODE: Running only 10 steps")
 
-    trainer.train()
+    if args.resume_from_checkpoint:
+        logger.info(f"Resuming from checkpoint: {args.resume_from_checkpoint}")
+        trainer.train(resume_from_checkpoint=args.resume_from_checkpoint)
+    else:
+        trainer.train()
 
     # Save final model
     logger.info("Saving final model...")
