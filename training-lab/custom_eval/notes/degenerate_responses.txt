@@ -1,0 +1,210 @@
+================================ ATTEMPT 1 ========================================
+
+WARNING:custom_eval.simple_negotiation:Degenerate response detected at turn 0: there a chance could get for than70?
+eller: 
+
+, I you help out, can give a discount take60
+
+eller:
+
+
+WARNING:custom_eval.simple_negotiation:Degenerate response detected at turn 1: things great Its brand new comes the box everything it should. about70?'
+'''''''''''''''''''''''''''
+WARNING:custom_eval.simple_negotiation:Degenerate response detected at turn 2: 100
+eller Are k.''
+
+eller
+
+eller
+
+eller
+eller
+eller
+eller
+eller
+eller
+eller
+eller
+eller
+eller
+eller
+
+WARNING:custom_eval.simple_negotiation:Degenerate response detected at turn 3: 40
+eller 40
+
+eller 0
+eller 0
+
+eller 0
+eller 0
+eller 0
+eller 
+eller 
+eller 
+eller 
+eller
+eller
+eller
+
+WARNING:custom_eval.simple_negotiation:Degenerate response detected at turn 4: '''''''''''''''''''''''''''''''''''70
+eller Are k me you serious this?''''''''''''''70
+eller
+eller
+e
+WARNING:custom_eval.simple_negotiation:Degenerate response detected at turn 5: 40
+eller My price 0
+eller My is4
+eller My is4
+eller is4
+WARNING:custom_eval.simple_negotiation:Degenerate response detected at turn 6: 50
+eller Are k, thats too.
+eller Im asking70.'''''''''''''''''''''''''''''''''''''''''''''''''''''''
+WARNING:custom_eval.simple_negotiation:Degenerate response detected at turn 7: 40
+eller My price $60
+eller My is60
+eller My is0
+eller is0
+WARNING:custom_eval.simple_negotiation:Degenerate response detected at turn 8: 62
+eller Are k,?
+eller Are k,?
+eller Are,?
+eller Are,
+eller Are
+eller Are
+eller
+eller
+eller
+WARNING:custom_eval.simple_negotiation:Degenerate response detected at turn 9: 40
+eller 4
+eller
+eller
+eller
+eller
+eller
+
+eller
+WARNING:custom_eval.simple_negotiation:Degenerate response detected at turn 10: 100
+eller I your reasonable
+eller I reasonable
+eller I
+eller
+WARNING:custom_eval.simple_negotiation:Degenerate response detected at turn 11: 40
+eller 00
+eller 0
+WARNING:custom_eval.simple_negotiation:Degenerate response detected at turn 12: 120
+eller Are k,' are?'
+eller Im asking40, is too for phone
+eller Are,' are?
+eller My is40 which fai
+WARNING:custom_eval.simple_negotiation:Degenerate response detected at turn 13: 0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+WARNING:custom_eval.simple_negotiation:Degenerate response detected at turn 14: 14
+eller 70
+eller 0
+eller 
+eller
+WARNING:custom_eval.simple_negotiation:Degenerate response detected at turn 15: 0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+WARNING:custom_eval.simple_negotiation:Degenerate response detected at turn 16: 120
+eller 10
+WARNING:custom_eval.simple_negotiation:Degenerate response detected at turn 17: 40
+eller 0
+eller 4
+eller4
+eller4
+4
+4
+WARNING:custom_eval.simple_negotiation:Degenerate response detected at turn 18: 12
+eller Is12
+istant
+WARNING:custom_eval.simple_negotiation:Degenerate response detected at turn 19: 40
+eller 4
+eller
+eller4
+eller
+eller
+eller
+eller
+eller
+eller
+eller
+
+eller4
+
+=======================================================================================================================================
+
+======================================= ATTEMPT 2 ==============================================
+
+WARNING:custom_eval.simple_negotiation:Degenerate response detected at turn 0: eller Im interested purchasing Frame Lapt 3 but offer120 is my limit Can seller meet?
+eller Thats my
+WARNING:custom_eval.simple_negotiation:Degenerate response detected at turn 1: , appreciate interest The is excellent condition has theedition the with 0 cycles.'M asking100,00.''
+WARNING:custom_eval.simple_negotiation:Degenerate response detected at turn 2: theres no way's this is $30 worth a
+eller Are k!, its new comes all original with recepts Thats wort
+WARNING:custom_eval.simple_negotiation:Degenerate response detected at turn 3: 300
+eller My price $00
+eller My is00
+eller is0
+eller is0
+eller0
+eller
+eller
+eller
+eller
+WARNING:custom_eval.simple_negotiation:Degenerate response detected at turn 4: eller your price $30
+ellers Are k,'.''''''''''''''''''''''''''''''''''7
+ellers Are k,.
+eller My pric
+WARNING:custom_eval.simple_negotiation:Degenerate response detected at turn 5: 300
+eller  is  in  area
+eller is in area
+WARNING:custom_eval.simple_negotiation:Degenerate response detected at turn 6: 000
+eller Im asking100
+eller 00
+eller00
+eller0
+WARNING:custom_eval.simple_negotiation:Degenerate response detected at turn 7: 30- warranty all parts included How we toize warranty
+eller 00
+eller 0
+eller 
+eller
+eller
+eller
+elle
+WARNING:custom_eval.simple_negotiation:Degenerate response detected at turn 8: 0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+WARNING:custom_eval.simple_negotiation:Degenerate response detected at turn 9: 30 days return. youll a good
+Buy Im not in US
+eller Im,'
+'30 days.
+WARNING:custom_eval.simple_negotiation:Degenerate response detected at turn 10: 0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+WARNING:custom_eval.simple_negotiation:Degenerate response detected at turn 11: 30- warranty included the.
+eller 30wary included
+Buy I
+eller 0- warranty.
+WARNING:custom_eval.simple_negotiation:Degenerate response detected at turn 12: 00
+WARNING:custom_eval.simple_negotiation:Degenerate response detected at turn 13: 300
+eller
+eller
+WARNING:custom_eval.simple_negotiation:Degenerate response detected at turn 14: 0
+WARNING:custom_eval.simple_negotiation:Degenerate response detected at turn 15: 30 days warranty
+eller 0 days
+eller 0
+eller
+eller
+WARNING:custom_eval.simple_negotiation:Degenerate response detected at turn 16: 0
+eller Is0
+WARNING:custom_eval.simple_negotiation:Degenerate response detected at turn 17: 30- warranty
+eller 0
+eller 
+eller 
+eller 
+eller 
+eller eller 
+eller
+WARNING:custom_eval.simple_negotiation:Degenerate response detected at turn 18: 0
+eller Are j? Buy:0eller Arej
+eller Arej
+eller Are
+WARNING:custom_eval.simple_negotiation:Degenerate response detected at turn 19: 300
+eller 30
+eller 30
+eller 0
+
+=======================================================================================================================================
