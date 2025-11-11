@@ -3,7 +3,7 @@ from __future__ import annotations
 import torch
 
 # Global defaults
-MAX_SEQ_LEN: int = 2048
+MAX_SEQ_LEN: int = 1280  # Optimized for data (max ~1200 tokens + buffer)
 PER_DEVICE_BATCH_SIZE: int = 1
 GRAD_ACCUM_STEPS: int = 8
 SEED: int = 42
