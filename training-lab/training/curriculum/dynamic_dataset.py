@@ -35,29 +35,38 @@ class CurriculumIterableDataset(IterableDataset):
             text = example.get("text", "")
             source = example.get("source", "unknown")
 
-            # Tokenize
-            tokenized = self.tokenizer(
-                text,
-                truncation=True,
-                max_length=self.max_seq_len,
-                padding=False,
-                return_tensors=None
-            )
+            # Check if data is pre-tokenized
+            if "input_ids" in example and "attention_mask" in example:
+                # Use pre-tokenized data (fast path - RAM lookup only)
+                input_ids = example["input_ids"]
+                attention_mask = example["attention_mask"]
+            else:
+                # Tokenize on-the-fly (slow path - backward compatible)
+                tokenized = self.tokenizer(
+                    text,
+                    truncation=True,
+                    max_length=self.max_seq_len,
+                    padding=False,
+                    return_tensors=None
+                )
+                input_ids = tokenized["input_ids"]
+                attention_mask = tokenized["attention_mask"]
 
-            # Pre-compute labels based on current phase
+            # Compute labels dynamically based on current phase
+            # (labels must be dynamic to support phase transitions)
             phase_config = self.wrapper.phase_config.phases[self.wrapper.current_phase]
             masking_strategy = phase_config["masking"].get(source, "assistant_only")
 
             labels = self.wrapper.masking_collator.compute_labels(
-                tokenized["input_ids"],
+                input_ids,
                 text,
                 source,
                 masking_strategy
             )
 
             yield {
-                "input_ids": tokenized["input_ids"],
-                "attention_mask": tokenized["attention_mask"],
+                "input_ids": input_ids,
+                "attention_mask": attention_mask,
                 "labels": labels,
                 "text": text,
                 "source": source
