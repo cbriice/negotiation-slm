@@ -102,15 +102,49 @@ class CurriculumMaskingCollator:
 
     def __call__(self, examples: List[Dict[str, Any]]) -> Dict[str, torch.Tensor]:
         """Process batch of examples."""
+        # Convert lists to tensors first
+        for example in examples:
+            if "input_ids" in example and not torch.is_tensor(example["input_ids"]):
+                example["input_ids"] = torch.tensor(example["input_ids"])
+            if "attention_mask" in example and not torch.is_tensor(example["attention_mask"]):
+                example["attention_mask"] = torch.tensor(example["attention_mask"])
+
+        # Apply masking
         for example in examples:
             self.mask_example(example)
 
-        # Stack into batch tensors
+        # Find max length for padding
+        max_length = max(len(ex["input_ids"]) for ex in examples)
+
+        # Pad and stack into batch tensors
         batch = {}
-        for key in examples[0].keys():
-            if torch.is_tensor(examples[0][key]):
-                batch[key] = torch.stack([ex[key] for ex in examples])
-            else:
-                batch[key] = [ex[key] for ex in examples]
+        pad_token_id = self.tokenizer.pad_token_id if self.tokenizer.pad_token_id is not None else self.tokenizer.eos_token_id
+
+        for key in ["input_ids", "attention_mask", "labels"]:
+            if key in examples[0]:
+                tensors = []
+                for ex in examples:
+                    tensor = ex[key]
+                    if len(tensor) < max_length:
+                        # Determine padding value
+                        if key == "input_ids":
+                            pad_value = pad_token_id
+                        elif key == "labels":
+                            pad_value = self.ignore_index
+                        else:  # attention_mask
+                            pad_value = 0
+
+                        # Pad tensor
+                        padding = torch.full((max_length - len(tensor),),
+                                           pad_value,
+                                           dtype=tensor.dtype)
+                        tensor = torch.cat([tensor, padding])
+                    tensors.append(tensor)
+                batch[key] = torch.stack(tensors)
+
+        # Don't include text and meta fields in the batch sent to the model
+        # They're only needed for masking logic, not for training
+        # Keep other non-training fields as lists if needed for debugging
+        # but exclude them from the final batch to avoid model errors
 
         return batch
