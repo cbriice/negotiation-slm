@@ -122,7 +122,9 @@ def main():
 
     if args.resume_from_checkpoint:
         logger.info(f"Resuming from checkpoint: {args.resume_from_checkpoint}")
-        trainer.train(resume_from_checkpoint=args.resume_from_checkpoint)
+        # For IterableDataset, we must skip data skipping to avoid hanging
+        # The checkpoint already has the correct step counter and optimizer state
+        trainer.train(resume_from_checkpoint=args.resume_from_checkpoint, ignore_data_skip=True)
     else:
         trainer.train()
 
