@@ -219,7 +219,7 @@ class NegotiationSession:
             prompt,
             temperature=self.temperature,
             max_tokens=150,  # Keep responses concise
-            stop_sequences=["\n\n", "Buyer:", "Seller:", "buyer:", "seller:"]
+            stop_sequences=["\n\n", "User:", "Assistant:", "user:", "assistant:"]
         )
 
         return response

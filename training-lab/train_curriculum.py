@@ -102,6 +102,9 @@ def main():
     lora_configurator = LoRAConfigurator()
     model = lora_configurator.apply_lora(model, lora_config)
 
+    # Set model reference in wrapper for checkpoint saving
+    wrapper.set_model(model)
+
     # Use max_steps from curriculum_parameters unless overridden
     max_steps = args.max_steps if args.max_steps != 8000 else cp.MAX_STEPS
     if args.test_mode:
@@ -174,9 +177,22 @@ def main():
     else:
         trainer.train()
 
-    # Save final model
+    # Save final model as phase checkpoint
     logger.info("Saving final model...")
     trainer.save_model(str(Path(args.output_dir) / "final"))
+
+    # Also save as final phase checkpoint
+    from training.curriculum.checkpoint_utils import save_phase_checkpoint
+    final_phase_num = len(cp.PHASES)
+    final_phase_name = cp.PHASES[-1]['name']
+    save_phase_checkpoint(
+        model=model,
+        phase_num=final_phase_num,
+        phase_name=final_phase_name,
+        step=max_steps,
+        total_phases=len(cp.PHASES),
+        output_dir=Path(args.output_dir)
+    )
 
     logger.info("Curriculum training complete!")
 

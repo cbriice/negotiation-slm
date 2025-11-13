@@ -45,16 +45,25 @@ class PromptBuilder:
 
         # Add conversation history if present
         if conversation_history:
-            prompt += "\n\n### Conversation so far:\n"
+            prompt += "\n\n"
             for speaker, message in conversation_history:
-                # Capitalize the speaker role for clarity
-                prompt += f"{speaker.capitalize()}: {message}\n"
+                # Show current role's previous messages as "You:"
+                # Show other party's messages as "User:"
+                # This way "Assistant:" only appears at generation time
+                if speaker == role:
+                    # This is the current role's previous message
+                    label = "You"
+                else:
+                    # This is the other party's message
+                    label = "User"
+                prompt += f"{label}: {message}\n"
 
-            # Add turn indicator
-            prompt += f"\n{role.capitalize()}: "
+            # Model always generates as Assistant
+            prompt += f"\nAssistant: "
         else:
             # Starting the conversation
-            prompt += f"\n\n### Start the negotiation:\n{role.capitalize()}: "
+            # Model generates as Assistant
+            prompt += f"\n\nAssistant: "
 
         return prompt
 
@@ -164,7 +173,11 @@ class PromptBuilder:
             Clean response text
         """
         # Remove role prefix if model repeated it
+        # Now we check for Assistant/User labels since that's what we use
         role_prefixes = [
+            "Assistant: ",
+            "assistant: ",
+            "ASSISTANT: ",
             f"{role.capitalize()}: ",
             f"{role}: ",
             f"{role.upper()}: "

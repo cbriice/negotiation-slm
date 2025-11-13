@@ -8,6 +8,8 @@ from training.curriculum.phase_config import CurriculumPhase, PhaseConfig
 from training.curriculum.masking_collator import CurriculumMaskingCollator
 from training.curriculum.data_sampler import CurriculumDataSampler
 from training.curriculum.monitor import CurriculumMonitor
+from training.curriculum.checkpoint_utils import save_phase_checkpoint
+import curriculum_parameters as cp
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +53,7 @@ class CurriculumTrainingWrapper:
         self.current_phase = first_phase_name
         self.recovery_mode = False
         self.recovery_end_step = 0
+        self.model = None  # Set via set_model() after initialization
 
         # Apply initial phase configuration
         self._apply_phase_config(self.current_phase)
@@ -91,11 +94,39 @@ class CurriculumTrainingWrapper:
         # Save checkpoint at phase transition
         self._save_phase_checkpoint()
 
+    def set_model(self, model):
+        """Set model reference for checkpoint saving."""
+        self.model = model
+
+    def _get_phase_number(self, phase_name: str) -> int:
+        """Get 1-indexed phase number from phase name."""
+        phase_names = list(self.phase_config.phases.keys())
+        try:
+            return phase_names.index(phase_name) + 1
+        except ValueError:
+            logger.warning(f"Unknown phase name: {phase_name}, using step-based fallback")
+            # Fallback: count which phase we're in based on cp.PHASES
+            for i, phase in enumerate(cp.PHASES, 1):
+                if phase.get('name') == phase_name:
+                    return i
+            return 1  # Default fallback
+
     def _save_phase_checkpoint(self):
         """Save checkpoint at phase boundary."""
-        checkpoint_dir = self.output_dir / f"phase_{self.current_phase}_step_{self.current_step}"
-        checkpoint_dir.mkdir(parents=True, exist_ok=True)
-        logger.info(f"Phase checkpoint saved to {checkpoint_dir}")
+        if self.model is None:
+            logger.warning("Model not set, skipping checkpoint save")
+            return
+
+        phase_num = self._get_phase_number(self.current_phase)
+        checkpoint_dir = save_phase_checkpoint(
+            model=self.model,
+            phase_num=phase_num,
+            phase_name=self.current_phase,
+            step=self.current_step,
+            total_phases=len(cp.PHASES),
+            output_dir=self.output_dir
+        )
+        logger.info(f"Phase {phase_num} checkpoint saved to {checkpoint_dir}")
 
     def get_current_phase(self) -> str:
         """Get the current training phase."""
