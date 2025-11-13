@@ -14,7 +14,7 @@ from trl import SFTTrainer
 
 from training.model_loader import ModelLoader
 from training.lora_config import LoRAConfigurator
-from training.curriculum.wrapper import CurriculumTrainingWrapper, CurriculumCallback
+from training.curriculum.wrapper import CurriculumTrainingWrapper, CurriculumCallback, MetricsLoggingCallback
 from training.curriculum.checkpoint_utils import (
     load_phase_checkpoint,
     adjust_phase_ranges,
@@ -80,6 +80,7 @@ def main():
     parser.add_argument("--base-lr", type=float, default=1e-5)
     parser.add_argument("--disable-recovery", action="store_true", help="Disable automatic recovery")
     parser.add_argument("--test-mode", action="store_true", help="Run in test mode with minimal steps")
+    parser.add_argument("--log-dir", type=str, default="logs", help="Directory for metrics logging")
 
     args = parser.parse_args()
 
@@ -172,7 +173,10 @@ def main():
         train_dataset=train_dataset,
         tokenizer=tokenizer,
         data_collator=wrapper.get_data_collator(),
-        callbacks=[CurriculumCallback(wrapper)],
+        callbacks=[
+            CurriculumCallback(wrapper),
+            MetricsLoggingCallback(log_dir=args.log_dir, stage="curriculum_resumed")
+        ],
         max_seq_length=params.MAX_SEQ_LEN,
     )
 

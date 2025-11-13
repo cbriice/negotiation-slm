@@ -9,6 +9,7 @@ from training.curriculum.masking_collator import CurriculumMaskingCollator
 from training.curriculum.data_sampler import CurriculumDataSampler
 from training.curriculum.monitor import CurriculumMonitor
 from training.curriculum.checkpoint_utils import save_phase_checkpoint
+from training.metrics_tracker import TrainingMetricsTracker
 import curriculum_parameters as cp
 
 logger = logging.getLogger(__name__)
@@ -276,3 +277,57 @@ class CurriculumCallback(TrainerCallback):
                 # Reduce LR by 50%
                 for param_group in kwargs.get('optimizer').param_groups:
                     param_group['lr'] *= 0.5
+
+
+class MetricsLoggingCallback(TrainerCallback):
+    """Trainer callback for logging metrics to CSV using TrainingMetricsTracker."""
+
+    def __init__(self, log_dir: str = "logs", stage: str = "curriculum"):
+        self.metrics_tracker = TrainingMetricsTracker(log_dir=log_dir, stage=stage)
+        self.start_time = None
+
+    def on_train_begin(self, args, state, control, **kwargs):
+        """Initialize timing."""
+        import time
+        self.start_time = time.time()
+
+    def on_log(self, args, state, control, logs=None, **kwargs):
+        """Log metrics when trainer logs."""
+        if logs is None:
+            return
+
+        # Calculate epoch
+        epoch = state.epoch if state.epoch is not None else 0.0
+
+        # Extract relevant metrics from logs
+        metrics = {}
+        for key in ["loss", "learning_rate", "grad_norm"]:
+            if key in logs:
+                if key == "loss":
+                    metrics["train_loss"] = logs[key]
+                elif key == "learning_rate":
+                    metrics["learning_rate"] = logs[key]
+                elif key == "grad_norm":
+                    metrics["gradient_norm"] = logs[key]
+
+        # Calculate tokens per second if we have the info
+        if self.start_time is not None and state.global_step > 0:
+            import time
+            elapsed = time.time() - self.start_time
+            if "num_input_tokens_seen" in state.__dict__:
+                tokens_per_second = state.num_input_tokens_seen / elapsed
+                metrics["tokens_per_second"] = tokens_per_second
+
+        # Log to CSV
+        self.metrics_tracker.log_training_step(
+            step=state.global_step,
+            epoch=epoch,
+            metrics=metrics,
+            log_to_console=False  # Trainer already logs to console
+        )
+
+    def on_train_end(self, args, state, control, **kwargs):
+        """Save summary at end of training."""
+        logger.info("Saving metrics summary...")
+        summary = self.metrics_tracker.save_training_summary()
+        logger.info(f"Metrics saved to: {self.metrics_tracker.training_csv}")
