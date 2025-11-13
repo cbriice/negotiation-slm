@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 
 def run_single_negotiation(session: NegotiationSession,
                           seed: Dict[str, Any],
+                          log_file=None,
                           verbose: bool = False) -> Dict[str, Any]:
     """Run a single negotiation and return results."""
 
@@ -35,11 +36,34 @@ def run_single_negotiation(session: NegotiationSession,
         logger.info(f"Buyer max: ${seed['buyer_state']['max_price']}, "
                    f"Seller min: ${seed['seller_state']['min_price']}")
 
+    # Log negotiation header BEFORE running
+    if log_file:
+        log_file.write(f"\n{'='*80}\n")
+        log_file.write(f"Negotiation: {seed.get('seed_id', 'unknown')}\n")
+        log_file.write(f"Item: {seed['item']['name']} at ${seed['item']['list_price']}\n")
+        log_file.write(f"Buyer max: ${seed['buyer_state']['max_price']}, "
+                      f"Seller min: ${seed['seller_state']['min_price']}\n")
+        log_file.write(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        log_file.write(f"{'='*80}\n\n")
+        log_file.flush()
+
     # Run negotiation
     result = session.run_negotiation(seed)
 
     # Add seed ID to result
     result['seed_id'] = seed.get('seed_id')
+
+    # Log outcome after negotiation completes
+    if log_file:
+        log_file.write(f"\n{'='*80}\n")
+        if result['metrics']['deal_made']:
+            log_file.write(f"OUTCOME: DEAL at ${result['metrics']['final_price']}\n")
+        else:
+            log_file.write(f"OUTCOME: NO DEAL\n")
+        log_file.write(f"Turns: {result['metrics']['turns']}\n")
+        log_file.write(f"Quality: {result['metrics']['conversation_quality']:.2f}\n")
+        log_file.write(f"{'='*80}\n\n")
+        log_file.flush()
 
     if verbose:
         # Print conversation
@@ -109,128 +133,155 @@ def main():
     if args.checkpoint:
         adapter_path = str(Path(adapter_path) / args.checkpoint)
 
-    logger.info(f"Loading model from {args.model_name}")
-    logger.info(f"Loading adapter from {adapter_path}")
+    # Create logs directory and open log file
+    log_dir = Path('logs')
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file_path = log_dir / 'selfchat_output.log'
 
-    # Initialize model wrapper
+    # Open log file in append mode for real-time logging
+    log_file = open(log_file_path, 'a', buffering=1)  # Line buffering for real-time writes
+
     try:
-        model = SimpleModelWrapper(
-            model_name=args.model_name,
-            adapter_path=adapter_path,
-            temperature=args.temperature,
-            max_tokens=args.max_tokens
-        )
-    except Exception as e:
-        logger.error(f"Failed to load model: {e}")
-        return 1
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        log_file.write(f"\n{'='*80}\n")
+        log_file.write(f"Evaluation started at {timestamp}\n")
+        log_file.write(f"Model: {args.model_name}\n")
+        log_file.write(f"Adapter: {adapter_path}\n")
+        log_file.write(f"{'='*80}\n\n")
+        log_file.flush()
 
-    # Print model info
-    model_info = model.get_model_info()
-    logger.info(f"Model loaded: {model_info}")
+        logger.info(f"Loading model from {args.model_name}")
+        logger.info(f"Loading adapter from {adapter_path}")
 
-    # Initialize negotiation session
-    session = NegotiationSession(
-        model_wrapper=model,
-        max_turns=args.max_turns,
-        temperature=args.temperature
-    )
-
-    # Load evaluation seeds
-    logger.info("Loading evaluation seeds...")
-    seed_loader = EvalSeedLoader(args.seed_file)
-
-    # Get seeds
-    seeds = seed_loader.get_seeds(
-        n=args.num_seeds,
-        category=args.category,
-        shuffle=True
-    )
-
-    logger.info(f"Loaded {len(seeds)} seeds for evaluation")
-
-    # Run evaluations
-    results = []
-    successful = 0
-    deals_made = 0
-    total_quality = 0.0
-
-    for i, seed in enumerate(seeds, 1):
-        logger.info(f"\n[{i}/{len(seeds)}] Running negotiation...")
-
+        # Initialize model wrapper
         try:
-            result = run_single_negotiation(session, seed, verbose=args.verbose)
-            results.append(result)
-
-            successful += 1
-            if result['metrics']['deal_made']:
-                deals_made += 1
-            total_quality += result['metrics']['conversation_quality']
-
+            model = SimpleModelWrapper(
+                model_name=args.model_name,
+                adapter_path=adapter_path,
+                temperature=args.temperature,
+                max_tokens=args.max_tokens
+            )
         except Exception as e:
-            logger.error(f"Error in negotiation {i}: {e}")
-            continue
+            logger.error(f"Failed to load model: {e}")
+            return 1
 
-    # Calculate summary statistics
-    summary = {
-        'total_negotiations': len(seeds),
-        'successful_negotiations': successful,
-        'deals_made': deals_made,
-        'deal_rate': deals_made / successful if successful > 0 else 0,
-        'average_quality': total_quality / successful if successful > 0 else 0,
-        'average_turns': sum(r['metrics']['turns'] for r in results) / len(results) if results else 0,
-        'model_info': model_info,
-        'evaluation_params': {
-            'num_seeds': args.num_seeds,
-            'max_turns': args.max_turns,
-            'temperature': args.temperature,
-            'category': args.category,
-        }
-    }
+        # Print model info
+        model_info = model.get_model_info()
+        logger.info(f"Model loaded: {model_info}")
 
-    # Print summary
-    print("\n" + "="*60)
-    print("EVALUATION SUMMARY")
-    print("="*60)
-    print(f"Negotiations run: {summary['successful_negotiations']}/{summary['total_negotiations']}")
-    print(f"Deals made: {summary['deals_made']} ({summary['deal_rate']:.1%})")
-    print(f"Average quality: {summary['average_quality']:.2f}")
-    print(f"Average turns: {summary['average_turns']:.1f}")
-    print("="*60)
+        # Initialize negotiation session
+        session = NegotiationSession(
+            model_wrapper=model,
+            max_turns=args.max_turns,
+            temperature=args.temperature,
+            log_file=log_file
+        )
 
-    # Save results
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    result_file = output_dir / f"selfchat_results_{timestamp}.json"
+        # Load evaluation seeds
+        logger.info("Loading evaluation seeds...")
+        seed_loader = EvalSeedLoader(args.seed_file)
 
-    with open(result_file, 'w') as f:
-        json.dump({
-            'summary': summary,
-            'negotiations': results
-        }, f, indent=2)
+        # Get seeds
+        seeds = seed_loader.get_seeds(
+            n=args.num_seeds,
+            category=args.category,
+            shuffle=True
+        )
 
-    logger.info(f"Results saved to {result_file}")
+        logger.info(f"Loaded {len(seeds)} seeds for evaluation")
 
-    # Save just the conversations in a readable format
-    conv_file = output_dir / f"conversations_{timestamp}.txt"
-    prompt_builder = PromptBuilder()
+        # Run evaluations
+        results = []
+        successful = 0
+        deals_made = 0
+        total_quality = 0.0
 
-    with open(conv_file, 'w') as f:
-        for result in results:
-            # Format conversation
-            history = [(d['speaker'], d['text']) for d in result['dialogue']]
-            outcome = {
-                'deal_made': result['metrics']['deal_made'],
-                'final_price': result['metrics']['final_price']
+        for i, seed in enumerate(seeds, 1):
+            logger.info(f"\n[{i}/{len(seeds)}] Running negotiation...")
+
+            try:
+                result = run_single_negotiation(session, seed, log_file=log_file, verbose=args.verbose)
+                results.append(result)
+
+                successful += 1
+                if result['metrics']['deal_made']:
+                    deals_made += 1
+                total_quality += result['metrics']['conversation_quality']
+
+            except Exception as e:
+                logger.error(f"Error in negotiation {i}: {e}")
+                continue
+
+        # Calculate summary statistics
+        summary = {
+            'total_negotiations': len(seeds),
+            'successful_negotiations': successful,
+            'deals_made': deals_made,
+            'deal_rate': deals_made / successful if successful > 0 else 0,
+            'average_quality': total_quality / successful if successful > 0 else 0,
+            'average_turns': sum(r['metrics']['turns'] for r in results) / len(results) if results else 0,
+            'model_info': model_info,
+            'evaluation_params': {
+                'num_seeds': args.num_seeds,
+                'max_turns': args.max_turns,
+                'temperature': args.temperature,
+                'category': args.category,
             }
+        }
 
-            formatted = prompt_builder.format_for_logging(history, outcome)
-            f.write(f"Seed ID: {result.get('seed_id', 'unknown')}\n")
-            f.write(f"Item: {result['seed_data']['item']['name']}\n")
-            f.write(formatted)
-            f.write("\n\n")
+        # Print summary
+        print("\n" + "="*60)
+        print("EVALUATION SUMMARY")
+        print("="*60)
+        print(f"Negotiations run: {summary['successful_negotiations']}/{summary['total_negotiations']}")
+        print(f"Deals made: {summary['deals_made']} ({summary['deal_rate']:.1%})")
+        print(f"Average quality: {summary['average_quality']:.2f}")
+        print(f"Average turns: {summary['average_turns']:.1f}")
+        print("="*60)
 
-    logger.info(f"Conversations saved to {conv_file}")
+        # Save results
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        result_file = output_dir / f"selfchat_results_{timestamp}.json"
 
-    return 0
+        with open(result_file, 'w') as f:
+            json.dump({
+                'summary': summary,
+                'negotiations': results
+            }, f, indent=2)
+
+        logger.info(f"Results saved to {result_file}")
+
+        # Save just the conversations in a readable format
+        conv_file = output_dir / f"conversations_{timestamp}.txt"
+        prompt_builder = PromptBuilder()
+
+        with open(conv_file, 'w') as f:
+            for result in results:
+                # Format conversation
+                history = [(d['speaker'], d['text']) for d in result['dialogue']]
+                outcome = {
+                    'deal_made': result['metrics']['deal_made'],
+                    'final_price': result['metrics']['final_price']
+                }
+
+                formatted = prompt_builder.format_for_logging(history, outcome)
+                f.write(f"Seed ID: {result.get('seed_id', 'unknown')}\n")
+                f.write(f"Item: {result['seed_data']['item']['name']}\n")
+                f.write(formatted)
+                f.write("\n\n")
+
+        logger.info(f"Conversations saved to {conv_file}")
+
+        # Close log file
+        log_file.write(f"\n{'='*80}\n")
+        log_file.write(f"Evaluation completed at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        log_file.write(f"{'='*80}\n")
+        logger.info(f"LLM output logged to {log_file_path}")
+
+        return 0
+    finally:
+        # Ensure log file is always closed
+        log_file.close()
 
 
 if __name__ == '__main__':

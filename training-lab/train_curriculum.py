@@ -8,6 +8,7 @@ import argparse
 import logging
 from pathlib import Path
 import torch
+import torch.nn as nn
 from transformers import TrainingArguments
 from trl import SFTTrainer
 
@@ -15,9 +16,44 @@ from training.model_loader import ModelLoader
 from training.lora_config import LoRAConfigurator
 from training.curriculum.wrapper import CurriculumTrainingWrapper, CurriculumCallback
 import training_parameters as params
+import curriculum_parameters as cp
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+class WeightedLossSFTTrainer(SFTTrainer):
+    """SFTTrainer with weighted loss support for curriculum learning."""
+
+    def compute_loss(self, model, inputs, return_outputs=False):
+        """Compute loss with per-token weighting if loss_weights present."""
+        loss_weights = inputs.pop("loss_weights", None)
+        labels = inputs.get("labels")
+        outputs = model(**inputs)
+        logits = outputs.logits
+
+        if loss_weights is None:
+            # Standard loss
+            loss = outputs.loss if hasattr(outputs, 'loss') and outputs.loss is not None else None
+            if loss is None:
+                shift_logits = logits[..., :-1, :].contiguous()
+                shift_labels = labels[..., 1:].contiguous()
+                loss_fct = nn.CrossEntropyLoss(ignore_index=-100)
+                loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
+            return (loss, outputs) if return_outputs else loss
+
+        # Weighted loss
+        shift_logits = logits[..., :-1, :].contiguous()
+        shift_labels = labels[..., 1:].contiguous()
+        shift_weights = loss_weights[..., 1:].contiguous()
+
+        loss_fct = nn.CrossEntropyLoss(reduction='none')
+        per_token_loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
+        per_token_loss = per_token_loss.view(shift_labels.size())
+        weighted_loss = per_token_loss * shift_weights
+        loss = weighted_loss.sum() / shift_weights.numel()
+
+        return (loss, outputs) if return_outputs else loss
 
 def main():
     parser = argparse.ArgumentParser(description="Curriculum training for negotiation model")
@@ -66,10 +102,15 @@ def main():
     lora_configurator = LoRAConfigurator()
     model = lora_configurator.apply_lora(model, lora_config)
 
+    # Use max_steps from curriculum_parameters unless overridden
+    max_steps = args.max_steps if args.max_steps != 8000 else cp.MAX_STEPS
+    if args.test_mode:
+        max_steps = 10
+
     # Training arguments
     training_args = TrainingArguments(
         output_dir=args.output_dir,
-        max_steps=args.max_steps if not args.test_mode else 10,
+        max_steps=max_steps,
         per_device_train_batch_size=args.batch_size,
         gradient_accumulation_steps=args.gradient_accumulation,
         learning_rate=args.base_lr,
@@ -101,8 +142,8 @@ def main():
         max_seq_len=params.MAX_SEQ_LEN
     )
 
-    # Create trainer with curriculum callback
-    trainer = SFTTrainer(
+    # Create trainer with curriculum callback (using weighted loss trainer)
+    trainer = WeightedLossSFTTrainer(
         model=model,
         args=training_args,
         train_dataset=train_dataset,
@@ -113,10 +154,16 @@ def main():
     )
 
     # Run training
-    logger.info("Starting curriculum training...")
-    logger.info(f"Phase 1 (0-2000): Contextual learning - 50/50 mix, minimal masking")
-    logger.info(f"Phase 2 (2000-4000): Guided practice - 30/70 mix, alternating masking")
-    logger.info(f"Phase 3 (4000-8000): Specialized training - 10/90 mix, full masking")
+    logger.info("Starting curriculum training with WEIGHTED MASKING...")
+    logger.info(f"Total steps: {max_steps}")
+    logger.info("")
+    for i, phase in enumerate(cp.PHASES, 1):
+        conv_ratio = phase['data_ratio']['conversational']
+        neg_ratio = phase['data_ratio']['negotiation']
+        user_w = phase['masking'].get('negotiation', {}).get('user_weight', 0.0)
+        logger.info(f"Phase {i}: {phase['name']} ({phase['step_start']}-{phase['step_end']})")
+        logger.info(f"  Data: Conv {conv_ratio:.0%} / Neg {neg_ratio:.0%}")
+        logger.info(f"  User weight: {user_w:.3f} / Assistant weight: 1.0")
 
     if args.test_mode:
         logger.info("TEST MODE: Running only 10 steps")
@@ -129,7 +176,7 @@ def main():
 
     # Save final model
     logger.info("Saving final model...")
-    trainer.save_model(Path(args.output_dir) / "final")
+    trainer.save_model(str(Path(args.output_dir) / "final"))
 
     logger.info("Curriculum training complete!")
 

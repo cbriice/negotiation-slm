@@ -37,15 +37,18 @@ class CurriculumTrainingWrapper:
         self.monitor = CurriculumMonitor()
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
 
+        # Get the first phase from configuration (supports any phase naming)
+        first_phase_name = self.phase_config.get_phase_at_step(0)
+
         # Initialize masking collator
         self.masking_collator = CurriculumMaskingCollator(
             self.tokenizer,
-            CurriculumPhase.PHASE_1_CONTEXTUAL
+            first_phase_name
         )
 
         # Training state
         self.current_step = 0
-        self.current_phase = CurriculumPhase.PHASE_1_CONTEXTUAL
+        self.current_phase = first_phase_name
         self.recovery_mode = False
         self.recovery_end_step = 0
 

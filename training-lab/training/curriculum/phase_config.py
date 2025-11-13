@@ -1,4 +1,5 @@
 from typing import Dict, Any, Tuple
+import curriculum_parameters as cp
 
 class CurriculumPhase:
     """Phase identifiers for curriculum learning."""
@@ -7,41 +8,22 @@ class CurriculumPhase:
     PHASE_3_SPECIALIZED = "specialized_training"
 
 class PhaseConfig:
-    """Configuration for curriculum training phases."""
+    """Configuration for curriculum training phases - loads from curriculum_parameters.py"""
 
     def __init__(self):
-        self.phases = {
-            CurriculumPhase.PHASE_1_CONTEXTUAL: {
-                "steps": (0, 2000),
-                "data_ratio": {"conversational": 0.5, "negotiation": 0.5},
-                "lr_multiplier": 0.5,
-                "masking": {
-                    "conversational": "none",
-                    "negotiation": "system_only"
-                },
-                "validation_frequency": 100
-            },
-            CurriculumPhase.PHASE_2_GUIDED: {
-                "steps": (2000, 4000),
-                "data_ratio": {"conversational": 0.3, "negotiation": 0.7},
-                "lr_multiplier": 1.0,
-                "masking": {
-                    "conversational": "none",
-                    "negotiation": "alternating"
-                },
-                "validation_frequency": 200
-            },
-            CurriculumPhase.PHASE_3_SPECIALIZED: {
-                "steps": (4000, 8000),
-                "data_ratio": {"conversational": 0.1, "negotiation": 0.9},
-                "lr_multiplier": 0.8,
-                "masking": {
-                    "conversational": "assistant_only",
-                    "negotiation": "assistant_only"
-                },
-                "validation_frequency": 500
+        """Initialize phases from curriculum_parameters.py"""
+        self.phases = {}
+
+        # Load phases from parameters file
+        for phase in cp.PHASES:
+            phase_name = phase["name"]
+            self.phases[phase_name] = {
+                "steps": (phase["step_start"], phase["step_end"]),
+                "data_ratio": phase["data_ratio"],
+                "lr_multiplier": phase["lr_multiplier"],
+                "masking": phase["masking"],
+                "validation_frequency": phase["validation_frequency"]
             }
-        }
 
     def get_phase_at_step(self, step: int) -> str:
         """Get the phase name for a given training step."""
@@ -50,4 +32,10 @@ class PhaseConfig:
             if start <= step < end:
                 return phase_name
         # Default to last phase if beyond defined steps
-        return CurriculumPhase.PHASE_3_SPECIALIZED
+        phase_names = list(self.phases.keys())
+        return phase_names[-1] if phase_names else None
+
+    def get_phase_config(self, step: int) -> Dict[str, Any]:
+        """Get the full configuration for the phase at a given step."""
+        phase_name = self.get_phase_at_step(step)
+        return self.phases.get(phase_name, {})

@@ -35,7 +35,8 @@ class NegotiationSession:
                  model_wrapper: SimpleModelWrapper,
                  max_turns: int = 20,
                  temperature: float = 0.7,
-                 use_single_model: bool = True):
+                 use_single_model: bool = True,
+                 log_file=None):
         """
         Initialize negotiation session.
 
@@ -44,6 +45,7 @@ class NegotiationSession:
             max_turns: Maximum turns in negotiation
             temperature: Generation temperature
             use_single_model: Whether to use the same model for both sides
+            log_file: Optional file handle for real-time logging
         """
         self.buyer_model = model_wrapper
         # Use same model for both sides by default (more realistic for self-play)
@@ -52,6 +54,7 @@ class NegotiationSession:
         self.max_turns = max_turns
         self.temperature = temperature
         self.prompt_builder = PromptBuilder(include_strategy_hints=False)
+        self.log_file = log_file
 
         # Conversation state
         self.conversation_history: List[Tuple[str, str]] = []
@@ -140,16 +143,23 @@ class NegotiationSession:
                 response = self.prompt_builder.extract_response(response, current_role)
 
                 # Check for quality issues
-                if self._is_degenerate_response(response):
-                    logger.warning(f"Degenerate response detected at turn {turn}: {response[:100]}")
-                    self.metrics.conversation_quality = max(0, self.metrics.conversation_quality - 0.2)
-                    # Try to recover with a generic response
-                    response = self._get_recovery_response(current_role, turn)
-                else:
-                    self.metrics.conversation_quality = min(1.0, self.metrics.conversation_quality + 0.05)
+                # if self._is_degenerate_response(response):
+                #     logger.warning(f"Degenerate response detected at turn {turn}: {response[:100]}")
+                #     self.metrics.conversation_quality = max(0, self.metrics.conversation_quality - 0.2)
+                #     # Try to recover with a generic response
+                #     response = self._get_recovery_response(current_role, turn)
+                # else:
+                #     self.metrics.conversation_quality = min(1.0, self.metrics.conversation_quality + 0.05)
+
+                self.metrics.conversation_quality = min(1.0, self.metrics.conversation_quality + 0.05)
 
                 # Add to history
                 self.conversation_history.append((current_role, response))
+
+                # Log output in real-time
+                if self.log_file:
+                    self.log_file.write(f"[{current_role.upper()} - Turn {turn + 1}]: {response}\n\n")
+                    self.log_file.flush()
 
                 # Update token counts (approximate)
                 token_count = len(response.split())
@@ -214,49 +224,49 @@ class NegotiationSession:
 
         return response
 
-    def _is_degenerate_response(self, response: str) -> bool:
-        """Check if response shows signs of degeneration."""
-        # Check for repetitive patterns
-        if len(response) < 10:
-            return True
+    # def _is_degenerate_response(self, response: str) -> bool:
+    #     """Check if response shows signs of degeneration."""
+    #     # Check for repetitive patterns
+    #     if len(response) < 10:
+    #         return True
 
-        # Check for excessive repetition
-        words = response.split()
-        if len(words) > 10:
-            # Check if any word repeats too much
-            word_counts = {}
-            for word in words:
-                word_counts[word] = word_counts.get(word, 0) + 1
-                # If any word is more than 30% of response, it's degenerate
-                if word_counts[word] > len(words) * 0.3:
-                    return True
+    #     # Check for excessive repetition
+    #     words = response.split()
+    #     if len(words) > 10:
+    #         # Check if any word repeats too much
+    #         word_counts = {}
+    #         for word in words:
+    #             word_counts[word] = word_counts.get(word, 0) + 1
+    #             # If any word is more than 30% of response, it's degenerate
+    #             if word_counts[word] > len(words) * 0.3:
+    #                 return True
 
-        # Check for nonsense patterns (like "istantistantistant")
-        if re.search(r'(\w{3,})\1{3,}', response):
-            return True
+    #     # Check for nonsense patterns (like "istantistantistant")
+    #     if re.search(r'(\w{3,})\1{3,}', response):
+    #         return True
 
-        # Check for corrupted output patterns
-        if any(pattern in response.lower() for pattern in ['istant', '''''', '0000', '7\n']):
-            return True
+    #     # Check for corrupted output patterns
+    #     if any(pattern in response.lower() for pattern in ['istant', '''''', '0000', '7\n']):
+    #         return True
 
-        return False
+    #     return False
 
-    def _get_recovery_response(self, role: str, turn: int) -> str:
-        """Get a recovery response when generation fails."""
-        if role == 'buyer':
-            if turn == 0:
-                return "Hi, I'm interested in your item. Can you tell me more about it?"
-            elif turn < 5:
-                return "That's interesting. What's your best price?"
-            else:
-                return "I'll need to think about this offer."
-        else:  # seller
-            if turn == 0:
-                return "Hello! It's a great item in excellent condition."
-            elif turn < 5:
-                return "I'm asking a fair price considering the condition and features."
-            else:
-                return "What price did you have in mind?"
+    # def _get_recovery_response(self, role: str, turn: int) -> str:
+    #     """Get a recovery response when generation fails."""
+    #     if role == 'buyer':
+    #         if turn == 0:
+    #             return "Hi, I'm interested in your item. Can you tell me more about it?"
+    #         elif turn < 5:
+    #             return "That's interesting. What's your best price?"
+    #         else:
+    #             return "I'll need to think about this offer."
+    #     else:  # seller
+    #         if turn == 0:
+    #             return "Hello! It's a great item in excellent condition."
+    #         elif turn < 5:
+    #             return "I'm asking a fair price considering the condition and features."
+    #         else:
+    #             return "What price did you have in mind?"
 
     def _check_deal_made(self, response: str) -> bool:
         """Check if response indicates a deal was made."""
