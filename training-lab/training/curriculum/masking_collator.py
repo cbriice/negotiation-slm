@@ -1,7 +1,10 @@
 import torch
 import re
+import logging
 from typing import Dict, Any, List, Optional
 from transformers import PreTrainedTokenizer
+
+logger = logging.getLogger(__name__)
 
 class CurriculumMaskingCollator:
     """Dynamic masking based on curriculum phase and data source.
@@ -85,9 +88,25 @@ class CurriculumMaskingCollator:
         return example
 
     def _apply_weighted_masking(self, example: Dict[str, Any], weight_config: Dict[str, float]) -> tuple:
-        """Apply weighted masking - returns labels and loss_weights tensors."""
+        """Apply weighted masking - returns labels and loss_weights tensors.
+
+        REQUIRES masking_regions in example. Will crash training if not present.
+        """
         input_ids = example["input_ids"]
         text = example.get("text", self.tokenizer.decode(input_ids))
+
+        # SAFETY CHECK: masking_regions MUST be present
+        if "masking_regions" not in example:
+            logger.critical("="*80)
+            logger.critical("FATAL: masking_regions not found in training example!")
+            logger.critical("Legacy regex-based masking is DISABLED (catastrophic for model behavior)")
+            logger.critical("Please reformat your dataset using reformat_to_next_utterance.py")
+            logger.critical("="*80)
+            raise RuntimeError(
+                "masking_regions not found in example. "
+                "Legacy regex masking is disabled. "
+                "Reformat dataset with reformat_to_next_utterance.py"
+            )
 
         # Convert input_ids to tensor if needed
         if not torch.is_tensor(input_ids):
@@ -104,52 +123,28 @@ class CurriculumMaskingCollator:
         assistant_weight = weight_config.get("assistant_weight", 1.0)
         system_weight = weight_config.get("system_weight", 0.0)
 
-        # Use pre-computed masking_regions if available
-        if "masking_regions" in example:
-            for region in example["masking_regions"]:
-                start_char = region["start"]
-                end_char = region["end"]
-                role = region["role"]
-                mask = region.get("mask", True)
+        # Apply weights using pre-computed masking_regions
+        for region in example["masking_regions"]:
+            start_char = region["start"]
+            end_char = region["end"]
+            role = region["role"]
+            mask = region.get("mask", True)
 
-                start_pos = self._get_token_position(text, start_char)
-                end_pos = self._get_token_position(text, end_char)
+            start_pos = self._get_token_position(text, start_char)
+            end_pos = self._get_token_position(text, end_char)
 
-                # Apply weights based on role and mask field
-                if role == "system":
-                    loss_weights[start_pos:end_pos] = system_weight
-                elif role == "user":
+            # Apply weights based on role and mask field
+            if role == "system":
+                loss_weights[start_pos:end_pos] = system_weight
+            elif role == "user":
+                loss_weights[start_pos:end_pos] = user_weight
+            elif role == "assistant":
+                if mask:
+                    # Non-final assistant turn (context) - use user_weight
                     loss_weights[start_pos:end_pos] = user_weight
-                elif role == "assistant":
-                    if mask:
-                        # Non-final assistant turn (context) - use user_weight
-                        loss_weights[start_pos:end_pos] = user_weight
-                    else:
-                        # Final assistant turn (target) - use assistant_weight
-                        loss_weights[start_pos:end_pos] = assistant_weight
-            return labels, loss_weights
-
-        # Fallback: regex-based masking (legacy support)
-        # Apply system weight (everything before first User:/Assistant:)
-        system_pattern = r"^(.*?)(?=(User:|Assistant:))"
-        system_match = re.search(system_pattern, text, re.DOTALL)
-        if system_match:
-            end_pos = self._get_token_position(text, system_match.end())
-            loss_weights[:end_pos] = system_weight
-
-        # Apply user weights
-        user_pattern = r"User:.*?(?=(Assistant:|User:|$))"
-        for match in re.finditer(user_pattern, text, re.DOTALL):
-            start_pos = self._get_token_position(text, match.start())
-            end_pos = self._get_token_position(text, match.end())
-            loss_weights[start_pos:end_pos] = user_weight
-
-        # Apply assistant weights (all assistant turns get full weight in legacy mode)
-        assistant_pattern = r"Assistant:.*?(?=(User:|Assistant:|$))"
-        for match in re.finditer(assistant_pattern, text, re.DOTALL):
-            start_pos = self._get_token_position(text, match.start())
-            end_pos = self._get_token_position(text, match.end())
-            loss_weights[start_pos:end_pos] = assistant_weight
+                else:
+                    # Final assistant turn (target) - use assistant_weight
+                    loss_weights[start_pos:end_pos] = assistant_weight
 
         return labels, loss_weights
 
