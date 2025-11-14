@@ -118,6 +118,9 @@ class CurriculumMaskingCollator:
         # Initialize all weights to 0.0
         loss_weights = torch.zeros_like(input_ids, dtype=torch.float)
 
+        # Track which tokens have been assigned weights (for overlap detection)
+        weight_assigned = torch.zeros_like(input_ids, dtype=torch.bool)
+
         # Get weights from config
         user_weight = weight_config.get("user_weight", 0.0)
         assistant_weight = weight_config.get("assistant_weight", 1.0)
@@ -133,6 +136,20 @@ class CurriculumMaskingCollator:
             start_pos = self._get_token_position(text, start_char)
             end_pos = self._get_token_position(text, end_char)
 
+            # VALIDATION: Detect overlapping weight assignments
+            if weight_assigned[start_pos:end_pos].any():
+                overlapping_indices = torch.where(weight_assigned[start_pos:end_pos])[0] + start_pos
+                logger.critical("="*80)
+                logger.critical("FATAL: Overlapping weight assignments detected!")
+                logger.critical(f"Region role={role}, mask={mask}, span=[{start_pos}:{end_pos}]")
+                logger.critical(f"Overlapping token positions: {overlapping_indices.tolist()}")
+                logger.critical("This indicates a bug in masking_regions generation")
+                logger.critical("="*80)
+                raise RuntimeError(
+                    f"Overlapping weight assignments detected at positions {overlapping_indices.tolist()}. "
+                    f"Each token must receive exactly one weight value."
+                )
+
             # Apply weights based on role and mask field
             if role == "system":
                 loss_weights[start_pos:end_pos] = system_weight
@@ -145,6 +162,9 @@ class CurriculumMaskingCollator:
                 else:
                     # Final assistant turn (target) - use assistant_weight
                     loss_weights[start_pos:end_pos] = assistant_weight
+
+            # Mark these tokens as assigned
+            weight_assigned[start_pos:end_pos] = True
 
         return labels, loss_weights
 

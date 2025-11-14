@@ -45,9 +45,14 @@ def parse_conversation(text):
 
 
 def create_masking_regions(text):
-    """Create masking regions for the text."""
+    """Create masking regions for the text.
+
+    CRITICAL: Only the FINAL assistant turn should have mask=False (full weight).
+    All other content (system, user, and non-final assistant turns) should have mask=True.
+    """
     regions = []
     current_pos = 0
+    assistant_region_indices = []  # Track indices of assistant regions
 
     for line in text.split('\n'):
         line_with_newline = line + '\n'
@@ -61,7 +66,7 @@ def create_masking_regions(text):
             mask = True
         elif line.startswith('Assistant:'):
             role = 'assistant'
-            mask = False
+            mask = False  # Temporarily set to False, will be updated later
         elif line.startswith('User:'):
             role = 'user'
             mask = True
@@ -78,17 +83,30 @@ def create_masking_regions(text):
                 role = 'system'
                 mask = True
 
+        region_idx = len(regions)
         regions.append({
             'start': current_pos,
             'end': current_pos + line_len,
             'mask': mask,
             'role': role
         })
+
+        # Track assistant regions
+        if role == 'assistant':
+            assistant_region_indices.append(region_idx)
+
         current_pos += line_len
 
     # Remove trailing newline from last region
     if regions:
         regions[-1]['end'] -= 1
+
+    # CRITICAL FIX: Mask all assistant turns EXCEPT the final one
+    # Only the final assistant turn should receive full assistant_weight
+    # All earlier assistant turns are context and should receive user_weight
+    if len(assistant_region_indices) > 1:
+        for idx in assistant_region_indices[:-1]:  # All except the last
+            regions[idx]['mask'] = True
 
     return regions
 

@@ -163,21 +163,21 @@ VALIDATION_3000 = {
     "PHASES": [
         {"name": "contextual_learning", "step_start": 0, "step_end": 800,
          "data_ratio": {"conversational": 0.5, "negotiation": 0.5},
-         "lr_multiplier": 0.7, "validation_frequency": 100,
+         "lr_multiplier": 0.9, "validation_frequency": 100,
          "masking": {
-             "conversational": {"user_weight": 0.0, "assistant_weight": 1.0, "system_weight": 0.0},
-             "negotiation": {"user_weight": 0.05, "assistant_weight": 1.0, "system_weight": 0.0}
+             "conversational": {"user_weight": 0.01, "assistant_weight": 1.0, "system_weight": 0.0},
+             "negotiation": {"user_weight": 0.02, "assistant_weight": 1.0, "system_weight": 0.0}
          }},
         {"name": "guided_practice", "step_start": 800, "step_end": 2100,
          "data_ratio": {"conversational": 0.2, "negotiation": 0.8},
-         "lr_multiplier": 0.6, "validation_frequency": 200,
+         "lr_multiplier": 1.0, "validation_frequency": 200,
          "masking": {
              "conversational": {"user_weight": 0.0, "assistant_weight": 1.0, "system_weight": 0.0},
-             "negotiation": {"user_weight": 0.02, "assistant_weight": 1.0, "system_weight": 0.0}
+             "negotiation": {"user_weight": 0.01, "assistant_weight": 1.0, "system_weight": 0.0}
          }},
         {"name": "specialized_training", "step_start": 2100, "step_end": 3000,
          "data_ratio": {"conversational": 0.05, "negotiation": 0.95},
-         "lr_multiplier": 1.0, "validation_frequency": 500,
+         "lr_multiplier": 0.8, "validation_frequency": 300,
          "masking": {
              "conversational": {"user_weight": 0.0, "assistant_weight": 1.0, "system_weight": 0.0},
              "negotiation": {"user_weight": 0.0, "assistant_weight": 1.0, "system_weight": 0.0}
@@ -190,8 +190,8 @@ VALIDATION_3000 = {
 # =============================================================================
 # To use a preset, uncomment one of these lines:
 
-MAX_STEPS, PHASES = DIAGNOSTIC_500["MAX_STEPS"], DIAGNOSTIC_500["PHASES"]
-# MAX_STEPS, PHASES = VALIDATION_3000["MAX_STEPS"], VALIDATION_3000["PHASES"]
+# MAX_STEPS, PHASES = DIAGNOSTIC_500["MAX_STEPS"], DIAGNOSTIC_500["PHASES"]
+MAX_STEPS, PHASES = VALIDATION_3000["MAX_STEPS"], VALIDATION_3000["PHASES"]
 
 # =============================================================================
 # HELPER FUNCTIONS

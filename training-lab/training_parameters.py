@@ -45,7 +45,7 @@ TARGET_MODULES = [
 R: int = 32
 ALPHA: int = 64
 DROPOUT: float = 0.05
-TARGET_MODULES = ["q_proj", "k_proj", "v_proj", "o_proj"]
+TARGET_MODULES = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
 
 # Trainer/runtime
 GRADIENT_CHECKPOINTING: bool = True
@@ -63,7 +63,7 @@ EVAL_STEPS = 100
 
 # SFT-specific
 SFT_MAX_STEPS: int = 4000
-SFT_LR: float = 5e-5              # Sweet spot between too fast (1e-4) and too slow (2e-5)
+SFT_LR: float = 3e-5              # Sweet spot between too fast (1e-4) and too slow (2e-5)
 # SFT_LR: float = 2e-5                # Too slow for initial training
 SFT_WARMUP_RATIO: float = 0.1   
 SFT_LR_SCHEDULER: str = "cosine"
