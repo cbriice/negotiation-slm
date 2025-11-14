@@ -52,22 +52,16 @@ class CurriculumIterableDataset(IterableDataset):
                 input_ids = tokenized["input_ids"]
                 attention_mask = tokenized["attention_mask"]
 
-            # Compute labels dynamically based on current phase
-            # (labels must be dynamic to support phase transitions)
-            phase_config = self.wrapper.phase_config.phases[self.wrapper.current_phase]
-            masking_strategy = phase_config["masking"].get(source, "assistant_only")
-
-            labels = self.wrapper.masking_collator.compute_labels(
-                input_ids,
-                text,
-                source,
-                masking_strategy
-            )
-
-            yield {
+            # Build example dict - let collator handle masking dynamically
+            result = {
                 "input_ids": input_ids,
                 "attention_mask": attention_mask,
-                "labels": labels,
                 "text": text,
                 "source": source
             }
+
+            # Pass through masking_regions if present (for next-utterance format)
+            if "masking_regions" in example:
+                result["masking_regions"] = example["masking_regions"]
+
+            yield result

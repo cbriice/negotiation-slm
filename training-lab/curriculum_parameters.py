@@ -118,6 +118,7 @@ PHASES = [PHASE_1, PHASE_2, PHASE_3]
 
 # PRESET: Ultra-Quick Diagnostic (500 steps, ~10-15 minutes)
 # Validates that weighted masking fixes the dialog generation problem
+"""
 DIAGNOSTIC_500 = {
     "MAX_STEPS": 500,
     "PHASES": [
@@ -132,6 +133,25 @@ DIAGNOSTIC_500 = {
         {"name": "phase3", "step_start": 350, "step_end": 500,
          "data_ratio": {"conversational": 0.05, "negotiation": 0.95},
          "lr_multiplier": 0.6, "validation_frequency": 50,
+         "masking": {"negotiation": {"user_weight": 0.0, "assistant_weight": 1.0, "system_weight": 0.0}}}
+    ]
+}
+"""
+
+DIAGNOSTIC_500 = {
+    "MAX_STEPS": 500,
+    "PHASES": [
+        {"name": "phase1", "step_start": 0, "step_end": 50,
+         "data_ratio": {"conversational": 0.5, "negotiation": 0.5},
+         "lr_multiplier": 0.7, "validation_frequency": 25,
+         "masking": {"negotiation": {"user_weight": 0.05, "assistant_weight": 1.0, "system_weight": 0.0}}},
+        {"name": "phase2", "step_start": 50, "step_end": 100,
+         "data_ratio": {"conversational": 0.2, "negotiation": 0.8},
+         "lr_multiplier": 0.85, "validation_frequency": 25,
+         "masking": {"negotiation": {"user_weight": 0.02, "assistant_weight": 1.0, "system_weight": 0.0}}},
+        {"name": "phase3", "step_start": 100, "step_end": 500,
+         "data_ratio": {"conversational": 0.05, "negotiation": 0.95},
+         "lr_multiplier": 1.0, "validation_frequency": 50,
          "masking": {"negotiation": {"user_weight": 0.0, "assistant_weight": 1.0, "system_weight": 0.0}}}
     ]
 }
@@ -170,8 +190,8 @@ VALIDATION_3000 = {
 # =============================================================================
 # To use a preset, uncomment one of these lines:
 
-# MAX_STEPS, PHASES = DIAGNOSTIC_500["MAX_STEPS"], DIAGNOSTIC_500["PHASES"]
-MAX_STEPS, PHASES = VALIDATION_3000["MAX_STEPS"], VALIDATION_3000["PHASES"]
+MAX_STEPS, PHASES = DIAGNOSTIC_500["MAX_STEPS"], DIAGNOSTIC_500["PHASES"]
+# MAX_STEPS, PHASES = VALIDATION_3000["MAX_STEPS"], VALIDATION_3000["PHASES"]
 
 # =============================================================================
 # HELPER FUNCTIONS

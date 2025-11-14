@@ -104,6 +104,32 @@ class CurriculumMaskingCollator:
         assistant_weight = weight_config.get("assistant_weight", 1.0)
         system_weight = weight_config.get("system_weight", 0.0)
 
+        # Use pre-computed masking_regions if available
+        if "masking_regions" in example:
+            for region in example["masking_regions"]:
+                start_char = region["start"]
+                end_char = region["end"]
+                role = region["role"]
+                mask = region.get("mask", True)
+
+                start_pos = self._get_token_position(text, start_char)
+                end_pos = self._get_token_position(text, end_char)
+
+                # Apply weights based on role and mask field
+                if role == "system":
+                    loss_weights[start_pos:end_pos] = system_weight
+                elif role == "user":
+                    loss_weights[start_pos:end_pos] = user_weight
+                elif role == "assistant":
+                    if mask:
+                        # Non-final assistant turn (context) - use user_weight
+                        loss_weights[start_pos:end_pos] = user_weight
+                    else:
+                        # Final assistant turn (target) - use assistant_weight
+                        loss_weights[start_pos:end_pos] = assistant_weight
+            return labels, loss_weights
+
+        # Fallback: regex-based masking (legacy support)
         # Apply system weight (everything before first User:/Assistant:)
         system_pattern = r"^(.*?)(?=(User:|Assistant:))"
         system_match = re.search(system_pattern, text, re.DOTALL)
@@ -118,7 +144,7 @@ class CurriculumMaskingCollator:
             end_pos = self._get_token_position(text, match.end())
             loss_weights[start_pos:end_pos] = user_weight
 
-        # Apply assistant weights
+        # Apply assistant weights (all assistant turns get full weight in legacy mode)
         assistant_pattern = r"Assistant:.*?(?=(User:|Assistant:|$))"
         for match in re.finditer(assistant_pattern, text, re.DOTALL):
             start_pos = self._get_token_position(text, match.start())

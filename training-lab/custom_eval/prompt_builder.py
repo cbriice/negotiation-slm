@@ -47,12 +47,11 @@ class PromptBuilder:
         if conversation_history:
             prompt += "\n\n"
             for speaker, message in conversation_history:
-                # Show current role's previous messages as "You:"
+                # Show current role's previous messages as "Assistant:"
                 # Show other party's messages as "User:"
-                # This way "Assistant:" only appears at generation time
                 if speaker == role:
                     # This is the current role's previous message
-                    label = "You"
+                    label = "Assistant"
                 else:
                     # This is the other party's message
                     label = "User"
