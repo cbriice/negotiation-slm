@@ -116,7 +116,9 @@ class WeightedLossSFTTrainer(SFTTrainer):
         per_token_loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
         per_token_loss = per_token_loss.view(shift_labels.size())
         weighted_loss = per_token_loss * shift_weights
-        loss = weighted_loss.sum() / shift_weights.numel()
+        # Normalize by sum of weights, not total token count
+        # This ensures proper loss scaling when most tokens have weight=0
+        loss = weighted_loss.sum() / shift_weights.sum()
 
         return (loss, outputs) if return_outputs else loss
 
@@ -271,6 +273,7 @@ def main():
         bf16=params.BF16,
         tf32=params.TF32,
         gradient_checkpointing=params.GRADIENT_CHECKPOINTING,
+        gradient_checkpointing_kwargs={"use_reentrant": False} if params.GRADIENT_CHECKPOINTING else None,
         optim=params.OPTIM,
         report_to=["tensorboard"] if not args.test_mode else [],
         remove_unused_columns=False,

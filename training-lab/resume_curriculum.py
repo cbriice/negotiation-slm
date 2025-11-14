@@ -58,7 +58,7 @@ class WeightedLossSFTTrainer(SFTTrainer):
         per_token_loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
         per_token_loss = per_token_loss.view(shift_labels.size())
         weighted_loss = per_token_loss * shift_weights
-        loss = weighted_loss.sum() / shift_weights.numel()
+        loss = weighted_loss.sum() / shift_weights.sum()
 
         return (loss, outputs) if return_outputs else loss
 
@@ -123,10 +123,26 @@ def main():
     model_loader = ModelLoader()
     model, tokenizer = model_loader.load_model(model_name=args.model_name)
 
-    # Load LoRA checkpoint onto model
-    logger.info(f"Loading LoRA adapters from checkpoint...")
-    from peft import PeftModel
-    model = PeftModel.from_pretrained(model, str(checkpoint_path))
+    # Apply LoRA (EXACT same as train_curriculum.py)
+    logger.info("Applying LoRA configuration...")
+    from peft import LoraConfig, TaskType
+    lora_config = LoraConfig(
+        r=64,  # Increased capacity
+        lora_alpha=128,
+        lora_dropout=0.1,
+        target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
+        bias="none",
+        task_type=TaskType.CAUSAL_LM,
+    )
+    lora_configurator = LoRAConfigurator()
+    model = lora_configurator.apply_lora(model, lora_config)
+
+    # Now load checkpoint weights into the LoRA adapters
+    logger.info(f"Loading checkpoint weights from: {checkpoint_path}")
+    from peft import PeftModel, set_peft_model_state_dict
+    from safetensors.torch import load_file
+    adapters_weights = load_file(Path(checkpoint_path) / "adapter_model.safetensors")
+    set_peft_model_state_dict(model, adapters_weights)
 
     # Set model reference in wrapper for checkpoint saving
     wrapper.set_model(model)
@@ -147,6 +163,7 @@ def main():
         bf16=params.BF16,
         tf32=params.TF32,
         gradient_checkpointing=params.GRADIENT_CHECKPOINTING,
+        gradient_checkpointing_kwargs={"use_reentrant": False} if params.GRADIENT_CHECKPOINTING else None,
         optim=params.OPTIM,
         report_to=["tensorboard"] if not args.test_mode else [],
         remove_unused_columns=False,
@@ -166,19 +183,26 @@ def main():
         max_seq_len=params.MAX_SEQ_LEN
     )
 
+    # Get data collator and ensure its tokenizer has correct padding side
+    data_collator = wrapper.get_data_collator()
+    if hasattr(data_collator, 'tokenizer') and data_collator.tokenizer is not None:
+        data_collator.tokenizer.padding_side = 'left'
+
+    tokenizer.padding_side = 'left'
     # Create trainer with curriculum callback
     trainer = WeightedLossSFTTrainer(
         model=model,
         args=training_args,
         train_dataset=train_dataset,
         tokenizer=tokenizer,
-        data_collator=wrapper.get_data_collator(),
+        data_collator=data_collator,
         callbacks=[
             CurriculumCallback(wrapper),
             MetricsLoggingCallback(log_dir=args.log_dir, stage="curriculum_resumed")
         ],
         max_seq_length=params.MAX_SEQ_LEN,
     )
+
 
     # Run training
     logger.info("Starting resumed curriculum training...")
@@ -195,6 +219,7 @@ def main():
     if args.test_mode:
         logger.info("TEST MODE: Running only 10 steps")
 
+    # Start training (adapters already loaded, no resume_from_checkpoint needed)
     trainer.train()
 
     # Save final model

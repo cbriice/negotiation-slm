@@ -58,7 +58,10 @@ class ModelLoader:
         )
         
         # Prepare for k-bit training
-        model = prepare_model_for_kbit_training(model)
+        model = prepare_model_for_kbit_training(
+            model,
+            use_gradient_checkpointing=params.GRADIENT_CHECKPOINTING
+        )
         
         # Enable gradient checkpointing if specified
         if params.GRADIENT_CHECKPOINTING:

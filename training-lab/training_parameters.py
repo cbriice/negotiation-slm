@@ -19,7 +19,7 @@ BNB_4BIT_USE_DOUBLE_QUANT: bool = True
 
 # Batching
 PER_DEVICE_TRAIN_BATCH_SIZE = 4     # microbatch = 4
-GRADIENT_ACCUMULATION_STEPS = 4     # effective batch = 12
+GRADIENT_ACCUMULATION_STEPS = 4     # effective batch = 16
 PER_DEVICE_EVAL_BATCH_SIZE = 3
 
 # Precision & Kernels
@@ -27,20 +27,9 @@ BF16 = True
 FP16 = False
 TF32 = True                         # matmul allow tf32
 ATTN_IMPLEMENTATION = "flash_attention_2"
-USE_GRADIENT_CHECKPOINTING = "mlp_only"
+USE_GRADIENT_CHECKPOINTING = True
 USE_FLASH_ATTENTION_2 = True       # Enable Flash Attention 2 by default
 
-# LoRA
-"""
-old defaults for heavy, domain-shifting training. too strong for baseline task style training - use with comprehensive, verified dataset
-R: int = 96
-ALPHA: int = 256
-DROPOUT: float = 0.05
-TARGET_MODULES = [
-    "q_proj", "k_proj", "v_proj", "o_proj",
-    "gate_proj", "up_proj", "down_proj"
-]
-"""
 # LoRA config for baseline task training
 R: int = 32
 ALPHA: int = 64
@@ -52,7 +41,6 @@ GRADIENT_CHECKPOINTING: bool = True
 OPTIM: str = "paged_adamw_8bit"
 BF16: bool = True                   # ok on Ampere/Ada; set False if you hit issues
 DEVICE_MAP: str = "auto"
-# PACKING: bool = False               # True if your SFT examples are short & homogeneous
 
 # Save/log
 LOGGING_STEPS: int = 10

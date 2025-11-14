@@ -286,11 +286,14 @@ class CurriculumMaskingCollator:
                         else:  # attention_mask
                             pad_value = 0
 
-                        # Pad tensor
+                        # Pad tensor (respect tokenizer padding_side)
                         padding = torch.full((max_length - len(tensor),),
                                            pad_value,
                                            dtype=tensor.dtype)
-                        tensor = torch.cat([tensor, padding])
+                        if self.tokenizer.padding_side == 'left':
+                            tensor = torch.cat([padding, tensor])
+                        else:
+                            tensor = torch.cat([tensor, padding])
                     tensors.append(tensor)
                 batch[key] = torch.stack(tensors)
 
