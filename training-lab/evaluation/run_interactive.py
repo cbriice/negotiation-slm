@@ -10,9 +10,9 @@ import logging
 from pathlib import Path
 from typing import Dict, Any, List, Tuple, Optional
 
-from custom_eval.model_wrapper import SimpleModelWrapper
-from custom_eval.eval_seeds import EvalSeedLoader
-from custom_eval.prompt_builder import PromptBuilder
+from evaluation.model_wrapper import SimpleModelWrapper
+from evaluation.eval_seeds import EvalSeedLoader
+from evaluation.prompt_builder import PromptBuilder
 
 # Set up logging
 logging.basicConfig(

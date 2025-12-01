@@ -418,7 +418,7 @@ class RuleAgent(NegotiatorBase):
     def act(self):
         """Generate a response based on persona, tactics, and rules."""
         # Import protocol validator
-        from utils.protocol_validator import check_for_leaked_tags
+        from _legacy.utils.protocol_validator import check_for_leaked_tags
         
         # Handle response delay if configured
         if self.response_delay > 0:

@@ -4,8 +4,8 @@ Quick test to verify the prompt format fix.
 This tests that the model responds correctly to User/Assistant format.
 """
 
-from custom_eval.model_wrapper import SimpleModelWrapper
-from custom_eval.prompt_builder import PromptBuilder
+from evaluation.model_wrapper import SimpleModelWrapper
+from evaluation.prompt_builder import PromptBuilder
 import logging
 
 logging.basicConfig(level=logging.INFO)

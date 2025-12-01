@@ -11,10 +11,10 @@ from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, List
 
-from custom_eval.model_wrapper import SimpleModelWrapper
-from custom_eval.simple_negotiation import NegotiationSession
-from custom_eval.eval_seeds import EvalSeedLoader
-from custom_eval.prompt_builder import PromptBuilder
+from evaluation.model_wrapper import SimpleModelWrapper
+from evaluation.simple_negotiation import NegotiationSession
+from evaluation.eval_seeds import EvalSeedLoader
+from evaluation.prompt_builder import PromptBuilder
 
 # Set up logging
 logging.basicConfig(

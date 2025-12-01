@@ -5,7 +5,7 @@ Test script to diagnose label alignment issue causing high loss.
 
 import torch
 from transformers import AutoTokenizer
-from utils.masking_regions_collator import DataCollatorForMaskingRegions
+from _legacy.utils.masking_regions_collator import DataCollatorForMaskingRegions
 
 def test_label_alignment():
     """Test that labels are properly aligned for autoregressive training."""

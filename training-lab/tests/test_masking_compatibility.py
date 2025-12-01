@@ -8,7 +8,7 @@ import json
 import torch
 from pathlib import Path
 from transformers import AutoTokenizer
-from utils.masking_regions_collator import DataCollatorForMaskingRegions
+from _legacy.utils.masking_regions_collator import DataCollatorForMaskingRegions
 import training_parameters as params
 
 

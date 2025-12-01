@@ -9,8 +9,8 @@ import logging
 from typing import Dict, Any, List, Tuple, Optional
 from dataclasses import dataclass, field
 
-from custom_eval.model_wrapper import SimpleModelWrapper
-from custom_eval.prompt_builder import PromptBuilder
+from evaluation.model_wrapper import SimpleModelWrapper
+from evaluation.prompt_builder import PromptBuilder
 
 logger = logging.getLogger(__name__)
 

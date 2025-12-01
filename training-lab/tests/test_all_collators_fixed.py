@@ -5,9 +5,9 @@ Test script to verify all collators have correct label alignment after fixes.
 
 import torch
 from transformers import AutoTokenizer
-from utils.masking_regions_collator import DataCollatorForMaskingRegions
-from utils.json_data_collator import DataCollatorForJSON
-from utils.weighted_loss_collator import WeightedLossCollator
+from _legacy.utils.masking_regions_collator import DataCollatorForMaskingRegions
+from _legacy.utils.json_data_collator import DataCollatorForJSON
+from _legacy.utils.weighted_loss_collator import WeightedLossCollator
 
 def test_collator_alignment(collator_name, collator, test_data):
     """Test that a collator has correct label alignment."""

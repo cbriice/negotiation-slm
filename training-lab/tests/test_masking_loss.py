@@ -5,7 +5,7 @@ Test script to verify masking behavior and diagnose high loss issue.
 
 import torch
 from transformers import AutoTokenizer
-from utils.masking_regions_collator import DataCollatorForMaskingRegions
+from _legacy.utils.masking_regions_collator import DataCollatorForMaskingRegions
 
 def test_masking():
     """Test that masking is applied correctly to the right parts."""

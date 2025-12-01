@@ -10,7 +10,7 @@ from pathlib import Path
 # Add project to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from tasks.selfplay_teacher import SelfPlayTeacher
+from _legacy.tasks.selfplay_teacher import SelfPlayTeacher
 
 
 def test_load_eval_seeds():
