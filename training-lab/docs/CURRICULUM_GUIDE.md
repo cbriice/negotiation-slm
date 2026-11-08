@@ -18,17 +18,17 @@ Uncomment a preset in `curriculum_parameters.py`:
 # Ultra-quick 500-step diagnostic (~10-15 min)
 MAX_STEPS, PHASES = DIAGNOSTIC_500["MAX_STEPS"], DIAGNOSTIC_500["PHASES"]
 
-# OR 2000-step validation (~1-2 hours)
-MAX_STEPS, PHASES = VALIDATION_2000["MAX_STEPS"], VALIDATION_2000["PHASES"]
+# OR 3000-step validation (the active preset)
+MAX_STEPS, PHASES = VALIDATION_3000["MAX_STEPS"], VALIDATION_3000["PHASES"]
 ```
 
 ### 3. Test Your Setup
 
 ```bash
-python test_curriculum_quick.py
+pytest tests/
 ```
 
-This validates that weighted masking is working correctly.
+`tests/test_masking_alignment.py` checks that loss weights land on exactly the target turn's tokens.
 
 ### 4. Run Training
 
@@ -43,7 +43,7 @@ python train_curriculum.py --max-steps 500 --output-dir models/diagnostic
 ## Understanding Weighted Masking
 
 ### The Problem (Binary Masking)
-Your original training used **binary masking** with `ignore_index=-100`:
+The original training used **binary masking** with `ignore_index=-100`:
 - User turns: **Completely removed** from loss (ignore_index=-100)
 - Assistant turns: **Fully trained** on
 
@@ -113,7 +113,7 @@ After training, test if the model:
 
 2. **Test checkpoint behavior**
    ```bash
-   python custom_eval/run_selfchat.py \
+   python -m evaluation.run_selfchat \
        --adapter-path models/test1/checkpoint-500 \
        --num-seeds 2 \
        --verbose
@@ -123,7 +123,7 @@ After training, test if the model:
    - Still generating dialogs? → **Reduce user_weight** (try 0.03 → 0.01)
    - Losing context? → **Increase user_weight** (try 0.05 → 0.08)
 
-4. **Run 2000-step validation** once 500-step looks good
+4. **Run the 3000-step validation preset** once 500-step looks good
 
 5. **Full 8000-step training** once validated
 
@@ -145,7 +145,7 @@ PHASE_3: user_weight=0.0, steps=2000-3000
 
 ### Recommended (Balanced)
 ```python
-PHASE_1: user_weight=0.05, steps=0-2000    # Default in curriculum_parameters.py
+PHASE_1: user_weight=0.05, steps=0-2000    # PHASE_1..3 in curriculum_parameters.py
 PHASE_2: user_weight=0.02, steps=2000-6000
 PHASE_3: user_weight=0.0, steps=6000-8000
 ```
@@ -154,7 +154,7 @@ PHASE_3: user_weight=0.0, steps=6000-8000
 
 ### "Model still generates full dialogs at step 500"
 - **Reduce user_weight** in Phase 1 from 0.05 to 0.02
-- Check that weighted masking is active: `python test_curriculum_quick.py`
+- Check that weighted masking is active: `pytest tests/test_masking_alignment.py`
 
 ### "Model responses are incoherent"
 - **Increase user_weight** in early phases to 0.08
@@ -167,11 +167,3 @@ PHASE_3: user_weight=0.0, steps=6000-8000
 ### "OOM (Out of Memory) errors"
 - **Reduce batch size**: `--batch-size 2` instead of 4
 - **Increase gradient accumulation**: `--gradient-accumulation 8` instead of 4
-
-## Files Modified
-
-- `curriculum_parameters.py` - **NEW**: All training configuration
-- `training/curriculum/phase_config.py` - Loads from parameters file
-- `training/curriculum/masking_collator.py` - Weighted masking implementation
-- `train_curriculum.py` - Uses WeightedLossSFTTrainer
-- `test_curriculum_quick.py` - **NEW**: Validation script

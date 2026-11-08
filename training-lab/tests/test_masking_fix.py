@@ -3,8 +3,6 @@
 Test script to verify that only the final assistant turn is unmasked.
 """
 
-import sys
-sys.path.insert(0, '/home/carson/code/Intentia/training-lab')
 
 from reformat_to_next_utterance import create_masking_regions
 

@@ -201,49 +201,6 @@ class CurriculumTrainingWrapper:
         """Get dataset iterator with proper mixing."""
         return self.data_sampler.get_epoch_iterator(batch_size, shuffle)
 
-    def prepare_phase_dataset(self, tokenizer, max_seq_len: int, num_samples: int):
-        """Prepare a pre-tokenized dataset for the current phase."""
-        from datasets import Dataset
-
-        # Sample data based on current phase ratio
-        samples = self.data_sampler.sample_batch(num_samples)
-
-        # Get current phase config
-        phase_config = self.phase_config.phases[self.current_phase]
-
-        # Pre-tokenize and compute labels
-        processed_samples = []
-        for example in samples:
-            text = example.get("text", "")
-            source = example.get("source", "unknown")
-
-            # Tokenize
-            tokenized = tokenizer(
-                text,
-                truncation=True,
-                max_length=max_seq_len,
-                padding=False,
-                return_tensors=None
-            )
-
-            # Pre-compute labels
-            masking_strategy = phase_config["masking"].get(source, "assistant_only")
-            labels = self.masking_collator.compute_labels(
-                tokenized["input_ids"],
-                text,
-                source,
-                masking_strategy
-            )
-
-            processed_samples.append({
-                "input_ids": tokenized["input_ids"],
-                "attention_mask": tokenized["attention_mask"],
-                "labels": labels,
-                "text": text,
-                "source": source
-            })
-
-        return Dataset.from_list(processed_samples)
 
 class CurriculumCallback(TrainerCallback):
     """Trainer callback for curriculum training integration."""

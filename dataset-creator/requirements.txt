@@ -1,20 +1,25 @@
-# Core Hugging Face dependencies
-transformers>=4.36.0
+# Generation (Qwen2.5-14B-Instruct, 4-bit)
 torch>=2.1.0
+transformers>=4.36.0
 accelerate>=0.25.0
-safetensors>=0.4.0
-
-# 4-bit quantization support
 bitsandbytes>=0.41.0
-
-# Tokenizers
+safetensors>=0.4.0
 tokenizers>=0.15.0
-
-# Other dependencies (keeping existing ones if needed)
 numpy>=1.24.0
+pandas
 tqdm>=4.65.0
 
+# scripts/strategy_labeler.py (Claude-based strategy labels)
 anthropic
 python-dotenv
 
-flash-attn
+# convodata/ (OASST1 and DeepDialogue conversational data), dataset analysis
+datasets
+tiktoken
+matplotlib
+
+# tests
+pytest
+
+# Optional, CUDA only
+# flash-attn

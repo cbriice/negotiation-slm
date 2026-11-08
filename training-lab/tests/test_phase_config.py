@@ -1,16 +1,20 @@
-import pytest
-from training.curriculum.phase_config import CurriculumPhase, PhaseConfig
+import curriculum_parameters as cp
+from training.curriculum.phase_config import PhaseConfig
 
-def test_phase_config_initialization():
-    config = PhaseConfig()
-    assert len(config.phases) == 3
-    assert CurriculumPhase.PHASE_1_CONTEXTUAL in config.phases
-    assert config.get_phase_at_step(0) == CurriculumPhase.PHASE_1_CONTEXTUAL
-    assert config.get_phase_at_step(2500) == CurriculumPhase.PHASE_2_GUIDED
-    assert config.get_phase_at_step(6000) == CurriculumPhase.PHASE_3_SPECIALIZED
 
-def test_phase_config_data_ratios():
+def test_phase_config_matches_curriculum_parameters():
     config = PhaseConfig()
-    phase1 = config.phases[CurriculumPhase.PHASE_1_CONTEXTUAL]
-    assert phase1["data_ratio"]["conversational"] == 0.5
-    assert phase1["data_ratio"]["negotiation"] == 0.5
+    assert list(config.phases) == [p["name"] for p in cp.PHASES]
+    for phase in cp.PHASES:
+        assert config.get_phase_at_step(phase["step_start"]) == phase["name"]
+        assert config.get_phase_at_step(phase["step_end"] - 1) == phase["name"]
+
+
+def test_steps_past_the_end_stay_in_last_phase():
+    config = PhaseConfig()
+    assert config.get_phase_at_step(cp.PHASES[-1]["step_end"] + 10_000) == cp.PHASES[-1]["name"]
+
+
+def test_phase_data_ratios_sum_to_one():
+    for phase in PhaseConfig().phases.values():
+        assert abs(sum(phase["data_ratio"].values()) - 1.0) < 1e-9

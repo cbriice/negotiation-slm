@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Test script to verify curriculum masking implementation.
-Tests both masking_regions mode and legacy regex mode.
+Tests masking_regions-based weighting.
 """
 
 import torch
@@ -105,74 +105,6 @@ Assistant: Deal! $120 works for me."""
     return True
 
 
-def test_legacy_regex_masking():
-    """Test fallback regex-based masking for legacy data."""
-    print("\n" + "="*80)
-    print("TEST 2: Legacy Format (regex-based)")
-    print("="*80)
-
-    # Initialize tokenizer
-    tokenizer = AutoTokenizer.from_pretrained("mistralai/Mistral-7B-v0.1")
-
-    # Create masking collator
-    collator = CurriculumMaskingCollator(tokenizer, "phase1")
-
-    # Simulate curriculum phase config
-    phase_config = {
-        "masking": {
-            "conversational": {
-                "user_weight": 0.0,
-                "assistant_weight": 1.0,
-                "system_weight": 0.0
-            }
-        }
-    }
-    collator.set_phase("phase1", phase_config)
-
-    # Sample text without masking_regions
-    text = """---
-system: You are a helpful assistant.
----
-User: Hello!
-Assistant: Hi there! How can I help?
-User: What's the weather?
-Assistant: I don't have real-time weather data."""
-
-    # Tokenize
-    tokenized = tokenizer(text, return_tensors="pt", add_special_tokens=False)
-    input_ids = tokenized["input_ids"][0]
-
-    # Create example (no masking_regions - triggers regex fallback)
-    example = {
-        "input_ids": input_ids,
-        "text": text,
-        "source": "conversational"
-    }
-
-    # Apply masking
-    result = collator.mask_example(example)
-    loss_weights = result["loss_weights"]
-
-    # Check unique weights
-    unique_weights = torch.unique(loss_weights)
-    print(f"Unique weights: {unique_weights.tolist()}")
-
-    # Verify assistant turns have weight 1.0
-    assert 1.0 in unique_weights, "Missing assistant weight (1.0)"
-
-    # Count tokens by weight
-    weight_counts = {}
-    for w in unique_weights:
-        count = (loss_weights == w).sum().item()
-        weight_counts[w.item()] = count
-
-    print(f"\nWeight distribution:")
-    for weight, count in sorted(weight_counts.items()):
-        print(f"  Weight {weight:.2f}: {count} tokens")
-
-    print("\n✓ Legacy regex masking PASSED")
-    return True
-
 
 def test_dynamic_curriculum_weights():
     """Test that curriculum weights are applied dynamically."""
@@ -267,7 +199,6 @@ def main():
 
     tests = [
         test_next_utterance_masking,
-        test_legacy_regex_masking,
         test_dynamic_curriculum_weights
     ]
 

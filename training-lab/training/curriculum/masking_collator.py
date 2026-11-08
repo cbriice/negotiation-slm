@@ -1,7 +1,8 @@
+import bisect
 import torch
 import re
 import logging
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Tuple
 from transformers import PreTrainedTokenizer
 
 logger = logging.getLogger(__name__)
@@ -11,6 +12,11 @@ class CurriculumMaskingCollator:
 
     Supports both binary masking (ignore_index=-100) and weighted masking (loss_weights).
     When masking config contains weight values, weighted masking is used.
+
+    Character spans (masking_regions or regex matches) are mapped to tokens with the
+    tokenizer's offset mapping, re-encoding the text exactly as it was tokenized for
+    training (special tokens included). A token belongs to a span when its first
+    character falls inside it.
     """
 
     def __init__(self, tokenizer: PreTrainedTokenizer, current_phase: str, ignore_index: int = -100):
@@ -32,24 +38,6 @@ class CurriculumMaskingCollator:
                 self.use_weighted_masking = True
                 break
 
-    def compute_labels(self, input_ids: list, text: str, source: str, masking_strategy: str) -> list:
-        """Compute labels for a given masking strategy (used for pre-computation)."""
-        example = {
-            "input_ids": input_ids,
-            "text": text,
-            "source": source
-        }
-
-        if masking_strategy == "none":
-            return input_ids.copy()
-        elif masking_strategy == "system_only":
-            return self._mask_system_only(example).tolist() if torch.is_tensor(self._mask_system_only(example)) else self._mask_system_only(example)
-        elif masking_strategy == "alternating":
-            return self._mask_alternating(example).tolist() if torch.is_tensor(self._mask_alternating(example)) else self._mask_alternating(example)
-        elif masking_strategy == "assistant_only":
-            return self._mask_non_assistant(example).tolist() if torch.is_tensor(self._mask_non_assistant(example)) else self._mask_non_assistant(example)
-        else:
-            return input_ids.copy()
 
     def mask_example(self, example: Dict[str, Any]) -> Dict[str, Any]:
         """Apply masking based on source and current phase."""
@@ -87,7 +75,42 @@ class CurriculumMaskingCollator:
         example["labels"] = labels
         return example
 
-    def _apply_weighted_masking(self, example: Dict[str, Any], weight_config: Dict[str, float]) -> tuple:
+    def _token_char_starts(self, text: str, input_ids) -> List[int]:
+        """First character index of each token in input_ids (-1 for special tokens).
+
+        Re-encodes text with the same call used to build input_ids and checks the ids
+        match, so the mapping can't silently drift (e.g. a missing BOS shifting every
+        span by one token).
+        """
+        if not getattr(self.tokenizer, "is_fast", False):
+            raise RuntimeError("Masking requires a fast tokenizer (offset mapping). Load it with use_fast=True.")
+
+        ids = input_ids.tolist() if torch.is_tensor(input_ids) else list(input_ids)
+        # The pipeline tokenizes with special tokens; also accept ids built without them
+        for add_special_tokens in (True, False):
+            enc = self.tokenizer(
+                text,
+                add_special_tokens=add_special_tokens,
+                truncation=True,
+                max_length=len(ids),
+                return_offsets_mapping=True,
+                return_special_tokens_mask=True,
+            )
+            if enc["input_ids"] == ids:
+                return [-1 if special else start
+                        for (start, _), special in zip(enc["offset_mapping"], enc["special_tokens_mask"])]
+        raise RuntimeError(
+            "input_ids do not match a fresh tokenization of the example text. "
+            "Re-run pre_tokenize_datasets.py with the tokenizer used for training."
+        )
+
+    @staticmethod
+    def _tokens_in_span(char_starts: List[int], start_char: int, end_char: int) -> torch.Tensor:
+        """Boolean mask of tokens whose first character lies in [start_char, end_char)."""
+        starts = torch.tensor(char_starts)
+        return (starts >= start_char) & (starts < end_char)
+
+    def _apply_weighted_masking(self, example: Dict[str, Any], weight_config: Dict[str, float]) -> Tuple[torch.Tensor, torch.Tensor]:
         """Apply weighted masking - returns labels and loss_weights tensors.
 
         REQUIRES masking_regions in example. Will crash training if not present.
@@ -108,79 +131,56 @@ class CurriculumMaskingCollator:
                 "Reformat dataset with reformat_to_next_utterance.py"
             )
 
-        # Convert input_ids to tensor if needed
         if not torch.is_tensor(input_ids):
             input_ids = torch.tensor(input_ids, dtype=torch.long)
 
-        # All tokens are labels (no masking)
+        # All tokens are labels; loss_weights decide what is learned
         labels = input_ids.clone()
-
-        # Initialize all weights to 0.0
         loss_weights = torch.zeros_like(input_ids, dtype=torch.float)
 
-        # Track which tokens have been assigned weights (for overlap detection)
-        weight_assigned = torch.zeros_like(input_ids, dtype=torch.bool)
-
-        # Get weights from config
         user_weight = weight_config.get("user_weight", 0.0)
         assistant_weight = weight_config.get("assistant_weight", 1.0)
         system_weight = weight_config.get("system_weight", 0.0)
 
-        # Apply weights using pre-computed masking_regions
-        for region in example["masking_regions"]:
-            start_char = region["start"]
-            end_char = region["end"]
-            role = region["role"]
-            mask = region.get("mask", True)
+        regions = sorted(example["masking_regions"], key=lambda r: r["start"])
 
-            start_pos = self._get_token_position(text, start_char)
-            end_pos = self._get_token_position(text, end_char)
-
-            # VALIDATION: Detect overlapping weight assignments
-            if weight_assigned[start_pos:end_pos].any():
-                overlapping_indices = torch.where(weight_assigned[start_pos:end_pos])[0] + start_pos
-                logger.critical("="*80)
-                logger.critical("FATAL: Overlapping weight assignments detected!")
-                logger.critical(f"Region role={role}, mask={mask}, span=[{start_pos}:{end_pos}]")
-                logger.critical(f"Overlapping token positions: {overlapping_indices.tolist()}")
-                logger.critical("This indicates a bug in masking_regions generation")
-                logger.critical("="*80)
+        # VALIDATION: regions must not overlap, so every token gets exactly one weight
+        for prev, cur in zip(regions, regions[1:]):
+            if cur["start"] < prev["end"]:
+                logger.critical(f"FATAL: overlapping masking_regions {prev} and {cur}")
                 raise RuntimeError(
-                    f"Overlapping weight assignments detected at positions {overlapping_indices.tolist()}. "
-                    f"Each token must receive exactly one weight value."
+                    f"Overlapping masking_regions at chars {cur['start']}-{prev['end']}. "
+                    "This indicates a bug in masking_regions generation."
                 )
 
-            # Apply weights based on role and mask field
-            if role == "system":
-                loss_weights[start_pos:end_pos] = system_weight
-            elif role == "user":
-                loss_weights[start_pos:end_pos] = user_weight
-            elif role == "assistant":
-                if mask:
-                    # Non-final assistant turn (context) - use user_weight
-                    loss_weights[start_pos:end_pos] = user_weight
-                else:
-                    # Final assistant turn (target) - use assistant_weight
-                    loss_weights[start_pos:end_pos] = assistant_weight
+        region_starts = [r["start"] for r in regions]
+        char_starts = self._token_char_starts(text, input_ids)
 
-            # Mark these tokens as assigned
-            weight_assigned[start_pos:end_pos] = True
+        for token_idx, char_pos in enumerate(char_starts):
+            if char_pos < 0:
+                continue  # special token (BOS/EOS): weight 0
+            region_idx = bisect.bisect_right(region_starts, char_pos) - 1
+            if region_idx < 0 or char_pos >= regions[region_idx]["end"]:
+                continue  # not covered by any region: weight 0
+            region = regions[region_idx]
+            role = region["role"]
+
+            if role == "system":
+                loss_weights[token_idx] = system_weight
+            elif role == "user":
+                loss_weights[token_idx] = user_weight
+            elif role == "assistant":
+                # Non-final assistant turns are context (mask=True) and get user_weight;
+                # only the final assistant turn (the target) gets assistant_weight
+                loss_weights[token_idx] = user_weight if region.get("mask", True) else assistant_weight
 
         return labels, loss_weights
-
-    def _get_token_position(self, text: str, char_position: int) -> int:
-        """Convert character position in text to token position."""
-        # Tokenize the text up to the character position
-        prefix = text[:char_position]
-        prefix_tokens = self.tokenizer.encode(prefix, add_special_tokens=False)
-        return len(prefix_tokens)
 
     def _mask_system_only(self, example: Dict[str, Any]) -> torch.Tensor:
         """Mask only the system prompt section."""
         input_ids = example["input_ids"]
         text = example.get("text", self.tokenizer.decode(input_ids))
 
-        # Convert input_ids to tensor if it's a list
         if not torch.is_tensor(input_ids):
             input_ids = torch.tensor(input_ids, dtype=torch.long)
 
@@ -191,10 +191,8 @@ class CurriculumMaskingCollator:
         match = re.search(system_pattern, text, re.DOTALL)
 
         if match:
-            # Tokenize the prefix to find position
-            prefix = text[:match.end()]
-            prefix_ids = self.tokenizer.encode(prefix, add_special_tokens=False)
-            labels[:len(prefix_ids)] = self.ignore_index
+            char_starts = self._token_char_starts(text, input_ids)
+            labels[self._tokens_in_span(char_starts, 0, match.end())] = self.ignore_index
 
         return labels
 
@@ -203,22 +201,16 @@ class CurriculumMaskingCollator:
         input_ids = example["input_ids"]
         text = example.get("text", self.tokenizer.decode(input_ids))
 
-        # Convert input_ids to tensor if it's a list
         if not torch.is_tensor(input_ids):
             input_ids = torch.tensor(input_ids, dtype=torch.long)
 
         labels = input_ids.clone()
+        char_starts = self._token_char_starts(text, input_ids)
 
         # Find all User: sections
         user_pattern = r"User:.*?(?=(Assistant:|User:|$))"
         for match in re.finditer(user_pattern, text, re.DOTALL):
-            start_text = text[:match.start()]
-            end_text = text[:match.end()]
-
-            start_tokens = len(self.tokenizer.encode(start_text, add_special_tokens=False))
-            end_tokens = len(self.tokenizer.encode(end_text, add_special_tokens=False))
-
-            labels[start_tokens:end_tokens] = self.ignore_index
+            labels[self._tokens_in_span(char_starts, match.start(), match.end())] = self.ignore_index
 
         return labels
 
@@ -227,22 +219,17 @@ class CurriculumMaskingCollator:
         input_ids = example["input_ids"]
         text = example.get("text", self.tokenizer.decode(input_ids))
 
-        # Convert input_ids to tensor if it's a list
         if not torch.is_tensor(input_ids):
             input_ids = torch.tensor(input_ids, dtype=torch.long)
 
         labels = torch.full_like(input_ids, self.ignore_index)
+        char_starts = self._token_char_starts(text, input_ids)
 
         # Find all Assistant: sections
         assistant_pattern = r"Assistant:.*?(?=(User:|Assistant:|$))"
         for match in re.finditer(assistant_pattern, text, re.DOTALL):
-            start_text = text[:match.start()]
-            end_text = text[:match.end()]
-
-            start_tokens = len(self.tokenizer.encode(start_text, add_special_tokens=False))
-            end_tokens = len(self.tokenizer.encode(end_text, add_special_tokens=False))
-
-            labels[start_tokens:end_tokens] = input_ids[start_tokens:end_tokens]
+            span = self._tokens_in_span(char_starts, match.start(), match.end())
+            labels[span] = input_ids[span]
 
         return labels
 

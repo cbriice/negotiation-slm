@@ -1,92 +1,53 @@
-#!/usr/bin/env python3
-"""Test script to verify converter output format."""
+"""messages_to_sft -> reformat_to_next_utterance on the example packet in schema/."""
 
 import json
-import sys
 from pathlib import Path
 
-# Add the training module to path
-sys.path.insert(0, str(Path(__file__).parent))
+from training.converters.messages_to_sft import MessagesToSFTConverter
+from reformat_to_next_utterance import split_conversation
 
-# Import only what we need, avoiding datasets
-import importlib.util
-spec = importlib.util.spec_from_file_location(
-    "messages_to_sft",
-    "training/converters/messages_to_sft.py"
-)
-module = importlib.util.module_from_spec(spec)
+EXAMPLE = Path(__file__).resolve().parents[1] / "schema" / "sft_packet_example.jsonl"
 
-# Patch out the datasets import
-sys.modules['datasets'] = type(sys)('datasets')
-sys.modules['datasets'].Dataset = None
 
-spec.loader.exec_module(module)
-MessagesToSFTConverter = module.MessagesToSFTConverter
+def load_example():
+    with open(EXAMPLE) as f:
+        return json.loads(f.readline())
 
-def test_conversion():
-    """Test the converter with the example packet."""
 
-    # Read the example packet
-    example_file = Path("schema/new/new_sft_packet_example.jsonl")
-    with open(example_file, 'r') as f:
-        packet = json.loads(f.readline())
+def test_conversion_layout_and_regions():
+    packet = load_example()
+    converted = MessagesToSFTConverter(mask_non_assistant=True).convert_packet(packet)
+    text, regions = converted["text"], converted["masking_regions"]
 
-    # Initialize converter
-    converter = MessagesToSFTConverter(mask_non_assistant=True)
+    assert text.startswith("---\nsystem:\nassistant_style: bluffing\n")
 
-    # Convert the packet
-    converted = converter.convert_packet(packet)
+    turns = [m for m in packet["messages"] if m["role"] != "system"]
+    assert converted["meta"]["assistant_turns"] == sum(m["role"] == "assistant" for m in turns)
+    assert converted["meta"]["user_turns"] == sum(m["role"] == "user" for m in turns)
 
-    # Print the formatted text
-    print("=" * 60)
-    print("CONVERTED OUTPUT:")
-    print("=" * 60)
-    print(converted['text'])
-    print("=" * 60)
-    print("\nMETADATA:")
-    print(json.dumps(converted['meta'], indent=2))
+    for prev, cur in zip(regions, regions[1:]):
+        assert prev["end"] <= cur["start"], "regions overlap"
+    assert regions[-1]["end"] <= len(text)
 
-    # Check masking regions if present
-    if 'masking_regions' in converted:
-        print("\n" + "=" * 60)
-        print("MASKING REGIONS (what gets -100 loss mask):")
-        print("=" * 60)
+    for region in regions:
+        span = text[region["start"]:region["end"]]
+        if region["role"] == "assistant":
+            assert span.startswith("Assistant: ")
+            assert region["mask"] is False
+        else:
+            assert region["mask"] is True
+        if region["role"] == "user":
+            assert span.startswith("User: ")
 
-        text = converted['text']
-        for i, region in enumerate(converted['masking_regions']):
-            start = region['start']
-            end = region['end']
-            snippet = text[start:min(start+50, end)].replace('\n', '\\n')
-            if end - start > 50:
-                snippet += '...'
 
-            print(f"\nRegion {i+1}:")
-            print(f"  Role: {region['role']}")
-            print(f"  Masked: {region['mask']}")
-            print(f"  Position: {start}-{end}")
-            print(f"  Content preview: {snippet}")
+def test_next_utterance_split_unmasks_only_the_final_assistant_turn():
+    converted = MessagesToSFTConverter(mask_non_assistant=True).convert_packet(load_example())
+    sub_packets = split_conversation({"text": converted["text"], "meta": converted["meta"]})
 
-        # Verify what's masked vs not masked
-        print("\n" + "=" * 60)
-        print("MASKING SUMMARY:")
-        print("=" * 60)
-
-        roles_masked = [r['role'] for r in converted['masking_regions'] if r['mask']]
-        roles_unmasked = [r['role'] for r in converted['masking_regions'] if not r['mask']]
-
-        print(f"Masked roles (get -100 loss mask): {set(roles_masked)}")
-        print(f"Unmasked roles (used for training): {set(roles_unmasked)}")
-
-        # Count turns
-        system_masked = sum(1 for r in converted['masking_regions'] if r['role'] == 'system' and r['mask'])
-        user_masked = sum(1 for r in converted['masking_regions'] if r['role'] == 'user' and r['mask'])
-        assistant_unmasked = sum(1 for r in converted['masking_regions'] if r['role'] == 'assistant' and not r['mask'])
-
-        print(f"\nSystem regions masked: {system_masked}")
-        print(f"User turns masked: {user_masked}")
-        print(f"Assistant turns unmasked (for training): {assistant_unmasked}")
-
-    return converted
-
-if __name__ == "__main__":
-    test_conversion()
+    assert len(sub_packets) == 3  # 5 assistant turns -> early / mid / final
+    for sub in sub_packets:
+        assistant = [r for r in sub["masking_regions"] if r["role"] == "assistant"]
+        assert [r["mask"] for r in assistant] == [True] * (len(assistant) - 1) + [False]
+        target = assistant[-1]
+        assert sub["text"][target["start"]:target["end"]].startswith("Assistant: ")
+        assert target["end"] == len(sub["text"])  # target turn is the last thing in the example
