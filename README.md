@@ -19,11 +19,11 @@ agents negotiate on behalf of their users. I designed the system: the control fu
 simulation flow, the personality/prompt-selection scheme, the data format, and the
 curriculum and masking strategy. Most of the code was written with Claude Code under my direction.
 
-Unfortunately I don't have any record of the data generated or the test runs. I kept them out of GitHub because
-the files were large. During a training run that spiked my GPU power above capacity, my PSU blew and 
-it corrupted the WSL instance I stored the files on, making them unrecoverable. From memory I did not get many 
-successful self-play trials as a result of training, and I was in the process of diagnosing and tuning the system
-when we decided to pivot the underlying concept for MVP development. I never finished the project fully to 
+Unfortunately I don't have any record of the data generated or the test runs besides what I dug up from old discord 
+chats in samples/. I kept them out of GitHub because the files were large. During a training run that spiked my GPU 
+power above capacity, my PSU blew and it corrupted the WSL instance I stored the files on, making them unrecoverable. 
+From memory I did not get many successful self-play trials as a result of training, and I was in the process of diagnosing 
+and tuning the system when we decided to pivot the underlying concept for MVP development. I never finished the project fully to 
 get successful demonstrable results. I remember encountering catastrophic forgetting in some cases and also during 
 one specific test run Mistral spontaneously started outputting tokens in Korean for some reason. Some data was 
 recovered from git history in training-lab/evaluation/notes/degenerate_responses.txt. It was a very interesting 
